@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 const CALCOM_API_KEY = process.env.CALCOM_API_KEY!;
 const CALCOM_BASE = "https://api.cal.com/v2";
@@ -34,16 +34,16 @@ export async function GET() {
         fetchCalBookings("past", 100),
         fetchCalBookings("cancelled", 100),
         fetchCalBookings("rejected", 100),
-        prisma.prospect.findMany({ where: { stage: "client" }, orderBy: { updatedAt: "desc" } }),
-        prisma.prospect.findMany({ select: { stage: true, source: true, createdAt: true } }),
-        prisma.instagramCache.findUnique({ where: { id: 1 } }),
-        prisma.instagramSnapshot.findMany({
+        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { updatedAt: "desc" } }),
+        getPrisma().prospect.findMany({ select: { stage: true, source: true, createdAt: true } }),
+        getPrisma().instagramCache.findUnique({ where: { id: 1 } }),
+        getPrisma().instagramSnapshot.findMany({
           where: { createdAt: { gte: thirtyDaysAgo } },
           orderBy: { createdAt: "asc" },
           select: { followers: true, createdAt: true },
         }),
-        prisma.manychatDmEvent.count(),
-        prisma.manychatDmEvent.count({ where: { triggeredAt: { gte: startOfMonth } } }),
+        getPrisma().manychatDmEvent.count(),
+        getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: startOfMonth } } }),
       ]);
 
     // Stats calls

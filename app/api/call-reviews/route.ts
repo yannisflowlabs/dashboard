@@ -1,10 +1,10 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 // GET — liste toutes les reviews + stats
 export async function GET() {
-  const reviews = await prisma.callReview.findMany({
+  const reviews = await getPrisma().callReview.findMany({
     orderBy: { startTime: "desc" },
   });
 
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Champs manquants" }, { status: 400 });
   }
 
-  const review = await prisma.callReview.upsert({
+  const review = await getPrisma().callReview.upsert({
     where: { bookingId: Number(bookingId) },
     update: { status },
     create: {

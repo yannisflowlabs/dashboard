@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 const API_KEY = process.env.CALCOM_API_KEY!;
 const BASE = "https://api.cal.com/v2";
@@ -52,7 +52,7 @@ export async function GET() {
     ]);
 
     // Auto-create reviews for "rejected" bookings that aren't reviewed yet
-    const existingReviews = await prisma.callReview.findMany({
+    const existingReviews = await getPrisma().callReview.findMany({
       select: { bookingId: true },
     });
     const reviewedIds = new Set(existingReviews.map((r) => r.bookingId));
@@ -61,7 +61,7 @@ export async function GET() {
       const id = b.id as number;
       if (!reviewedIds.has(id)) {
         const attendees = (b.attendees as { name: string; email: string }[]) ?? [];
-        await prisma.callReview.create({
+        await getPrisma().callReview.create({
           data: {
             bookingId: id,
             bookingUid: b.uid as string,
@@ -83,7 +83,7 @@ export async function GET() {
       const attendee = attendees[0];
       if (!attendee?.email) continue;
       const isUpcoming = upcoming.includes(b);
-      await prisma.prospect.upsert({
+      await getPrisma().prospect.upsert({
         where: { email: attendee.email },
         update: { name: attendee.name, calBookingUid: b.uid as string },
         create: {
@@ -97,7 +97,7 @@ export async function GET() {
     }
 
     // Reload reviews after auto-creation
-    const allReviews = await prisma.callReview.findMany({
+    const allReviews = await getPrisma().callReview.findMany({
       select: { bookingId: true, status: true },
     });
     const reviewMap = new Map(allReviews.map((r) => [r.bookingId, r.status]));

@@ -1,9 +1,9 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 export async function GET() {
-  const prospects = await prisma.prospect.findMany({
+  const prospects = await getPrisma().prospect.findMany({
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ prospects });
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nom et email requis" }, { status: 400 });
   }
 
-  const prospect = await prisma.prospect.upsert({
+  const prospect = await getPrisma().prospect.upsert({
     where: { email },
     update: {
       name,

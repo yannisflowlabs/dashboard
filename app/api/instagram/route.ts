@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { ApifyClient } from "apify-client";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 const client = new ApifyClient({ token: process.env.APIFY_API_TOKEN });
 const INSTAGRAM_USERNAME = "yannisflowlabs";
@@ -36,15 +36,15 @@ async function scrapeAndBuild() {
 
   // Snapshot quotidien
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const existingToday = await prisma.instagramSnapshot.findFirst({ where: { createdAt: { gte: today } } });
+  const existingToday = await getPrisma().instagramSnapshot.findFirst({ where: { createdAt: { gte: today } } });
   if (!existingToday) {
-    await prisma.instagramSnapshot.create({
+    await getPrisma().instagramSnapshot.create({
       data: { followers: p.followersCount as number, postsCount: p.postsCount as number },
     });
   }
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const snapshots = await prisma.instagramSnapshot.findMany({
+  const snapshots = await getPrisma().instagramSnapshot.findMany({
     where: { createdAt: { gte: thirtyDaysAgo } },
     orderBy: { createdAt: "asc" },
   });
@@ -91,7 +91,7 @@ async function scrapeAndBuild() {
   };
 
   // Sauvegarder en cache
-  await prisma.instagramCache.upsert({
+  await getPrisma().instagramCache.upsert({
     where: { id: 1 },
     update: { data: JSON.stringify(result), updatedAt: new Date() },
     create: { id: 1, data: JSON.stringify(result), updatedAt: new Date() },
@@ -103,7 +103,7 @@ async function scrapeAndBuild() {
 // GET — retourne le cache instantanément
 export async function GET() {
   try {
-    const cache = await prisma.instagramCache.findUnique({ where: { id: 1 } });
+    const cache = await getPrisma().instagramCache.findUnique({ where: { id: 1 } });
     if (cache) {
       return NextResponse.json(JSON.parse(cache.data));
     }

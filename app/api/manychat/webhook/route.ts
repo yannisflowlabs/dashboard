@@ -1,12 +1,12 @@
 export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { getPrisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    await prisma.manychatDmEvent.create({
+    await getPrisma().manychatDmEvent.create({
       data: {
         contactId: body?.id ?? body?.subscriber_id ?? null,
         flowName: body?.flow_name ?? body?.name ?? null,
@@ -22,6 +22,6 @@ export async function POST(req: NextRequest) {
 
 // GET pour tester que l'endpoint est vivant
 export async function GET() {
-  const total = await prisma.manychatDmEvent.count();
+  const total = await getPrisma().manychatDmEvent.count();
   return NextResponse.json({ ok: true, totalDmEvents: total });
 }
