@@ -1,0 +1,7 @@
+-- CreateTable
+CREATE TABLE "InstagramSnapshot" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "followers" INTEGER NOT NULL,
+    "postsCount" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,0 +1,58 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model CallReview {
+  id            Int      @id @default(autoincrement())
+  bookingId     Int      @unique
+  bookingUid    String   @unique
+  attendeeName  String
+  attendeeEmail String
+  startTime     DateTime
+  status        String   // "showed" | "noshow" | "cancelled"
+  calStatus     String   @default("accepted") // "accepted" | "rejected" | "cancelled"
+  createdAt     DateTime @default(now())
+}
+
+model InstagramSnapshot {
+  id          Int      @id @default(autoincrement())
+  followers   Int
+  postsCount  Int
+  createdAt   DateTime @default(now())
+}
+
+model InstagramCache {
+  id        Int      @id @default(1)
+  data      String   // JSON stringifié
+  updatedAt DateTime @default(now())
+}
+
+model ManychatDmEvent {
+  id          Int      @id @default(autoincrement())
+  contactId   String?  // ID ManyChat du contact (peut être null si supprimé)
+  flowName    String?  // Nom du flow qui a déclenché le DM
+  triggeredAt DateTime @default(now())
+}
+
+model Prospect {
+  id         Int      @id @default(autoincrement())
+  name       String
+  email      String   @unique
+  phone      String?
+  source     String   @default("calcom") // "calcom" | "manual"
+  stage      String   @default("prospect") // "prospect" | "call_booked" | "call_done" | "proposal_sent" | "client" | "lost"
+  notes      String?
+  calBookingUid String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
