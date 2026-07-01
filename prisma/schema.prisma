@@ -44,6 +44,12 @@ model ManychatDmEvent {
   triggeredAt DateTime @default(now())
 }
 
+model ManualMetric {
+  key       String   @id // ex: "reelsViews"
+  value     Int      @default(0)
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 model Prospect {
   id         Int      @id @default(autoincrement())
   name       String

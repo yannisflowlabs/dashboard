@@ -34,6 +34,11 @@ export default function TunnelPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Édition manuelle des vues Reels (API Meta bloquée)
+  const [editingReels, setEditingReels] = useState(false);
+  const [reelsInput, setReelsInput] = useState("");
+  const [savingReels, setSavingReels] = useState(false);
+
   useEffect(() => {
     fetch("/api/tunnel")
       .then((r) => r.json())
@@ -45,6 +50,25 @@ export default function TunnelPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  async function saveReelsViews() {
+    const value = Number(reelsInput.replace(/\s/g, ""));
+    if (!Number.isFinite(value) || value < 0) return;
+    setSavingReels(true);
+    try {
+      await fetch("/api/manual-metrics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "reelsViews", value }),
+      });
+      setData((prev) =>
+        prev ? { ...prev, funnel: { ...prev.funnel, reelsViews: value } } : prev
+      );
+      setEditingReels(false);
+    } finally {
+      setSavingReels(false);
+    }
+  }
+
   const reelsViews = data?.funnel.reelsViews ?? 0;
   const dmSent = data?.funnel.dmSent ?? 0;
   const siteVisits = data?.funnel.siteVisits ?? null;
@@ -55,7 +79,7 @@ export default function TunnelPage() {
     {
       label: "Vues Reels",
       value: reelsViews,
-      sub: reelsViews > 0 ? "Total vues · cache Instagram" : "Cache Instagram non disponible",
+      sub: reelsViews > 0 ? "Total vues · saisie manuelle" : "À saisir manuellement",
       color: "#A8C5A0",
     },
     {
@@ -67,7 +91,7 @@ export default function TunnelPage() {
     {
       label: "Visites site web",
       value: siteVisits ?? 0,
-      sub: siteVisits !== null ? "Via Plausible Analytics" : "Plausible non configuré",
+      sub: siteVisits !== null ? "Via Umami Analytics" : "Umami non configuré",
       color: "#F0C860",
     },
     {
@@ -168,19 +192,15 @@ export default function TunnelPage() {
           </div>
         )}
 
-        {!data?.hasPlausible && (
+        {reelsViews === 0 && (
           <div style={{
             display: "flex", alignItems: "center", gap: "6px",
-            padding: "8px 12px", background: "#F5F3FF",
-            borderRadius: "var(--radius-row)", fontSize: 12, color: "#5B4A8A",
+            padding: "8px 12px", background: "#F0F5EE",
+            borderRadius: "var(--radius-row)", fontSize: 12, color: "#3E5A38",
           }}>
             <AlertCircle size={12} />
             <span>
-              Visites site non disponibles —{" "}
-              <a href="/reglages" style={{ color: "inherit", fontWeight: 600, textDecoration: "underline" }}>
-                configure Plausible
-              </a>
-              .
+              Vues Reels à saisir manuellement (API Meta bloquée) — clique sur «&nbsp;Éditer&nbsp;» dans la carte Vues Reels ci-dessous.
             </span>
           </div>
         )}
@@ -188,13 +208,78 @@ export default function TunnelPage() {
 
       {/* KPIs */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "12px", marginBottom: "20px" }}>
-        <KpiCard
-          title="Vues Reels"
-          value={reelsViews > 0 ? reelsViews.toLocaleString("fr-FR") : "—"}
-          sub="Cache Instagram"
-          accent="sage"
-          icon={<Play size={15} />}
-        />
+        <div style={{
+          position: "relative",
+          background: "var(--card)", border: "1px solid var(--border)",
+          borderRadius: "var(--radius-card)", padding: "14px 16px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
+              <Play size={15} /> Vues Reels
+            </div>
+            {!editingReels && (
+              <button
+                onClick={() => { setReelsInput(String(reelsViews || "")); setEditingReels(true); }}
+                style={{
+                  fontSize: 11, color: "var(--text-muted)", cursor: "pointer",
+                  background: "none", border: "none", textDecoration: "underline", padding: 0,
+                }}
+              >
+                Éditer
+              </button>
+            )}
+          </div>
+          {editingReels ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <input
+                type="number"
+                min={0}
+                autoFocus
+                value={reelsInput}
+                onChange={(e) => setReelsInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveReelsViews(); if (e.key === "Escape") setEditingReels(false); }}
+                placeholder="Total des vues"
+                style={{
+                  width: "100%", padding: "6px 8px", fontSize: 18, fontWeight: 700,
+                  border: "1px solid var(--border)", borderRadius: "var(--radius-row)",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={saveReelsViews}
+                  disabled={savingReels}
+                  style={{
+                    flex: 1, padding: "5px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: "#A8C5A0", color: "#1a2e1a", border: "none",
+                    borderRadius: "var(--radius-row)", opacity: savingReels ? 0.6 : 1,
+                  }}
+                >
+                  {savingReels ? "..." : "Enregistrer"}
+                </button>
+                <button
+                  onClick={() => setEditingReels(false)}
+                  style={{
+                    padding: "5px 10px", fontSize: 12, cursor: "pointer",
+                    background: "none", color: "var(--text-muted)",
+                    border: "1px solid var(--border)", borderRadius: "var(--radius-row)",
+                  }}
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text)" }}>
+                {reelsViews > 0 ? reelsViews.toLocaleString("fr-FR") : "—"}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                Saisie manuelle
+              </div>
+            </>
+          )}
+        </div>
         <KpiCard
           title="DM envoyés"
           value={dmSent > 0 ? dmSent.toLocaleString("fr-FR") : "—"}

@@ -72,7 +72,7 @@ export async function GET() {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     // Cal.com + Prisma + Umami en parallèle
-    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmTotal, dmThisMonth, umamiVisits] =
+    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmTotal, dmThisMonth, umamiVisits, reelsViewsMetric] =
       await Promise.all([
         fetchCalBookings("upcoming", 100),
         fetchCalBookings("past", 100),
@@ -89,6 +89,7 @@ export async function GET() {
         getPrisma().manychatDmEvent.count(),
         getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: startOfMonth } } }),
         fetchUmamiVisits(),
+        getPrisma().manualMetric.findUnique({ where: { key: "reelsViews" } }),
       ]);
 
     // Stats calls
@@ -118,9 +119,9 @@ export async function GET() {
       .sort((a, b) => b.calls - a.calls)
       .slice(0, 5);
 
-    // Instagram
-    let reelsViews = 0;
-    if (igCache) {
+    // Instagram — vues Reels : priorité à la saisie manuelle (API Meta bloquée)
+    let reelsViews = reelsViewsMetric?.value ?? 0;
+    if (reelsViews === 0 && igCache) {
       try {
         const igData = JSON.parse(igCache.data) as { reelsViews?: number; recentPosts?: { type: string; views?: number; plays?: number }[] };
         if (igData.reelsViews) {
