@@ -9,6 +9,50 @@ const CALCOM_HEADERS = {
   "cal-api-version": "2024-08-13",
 };
 
+const UMAMI_URL = process.env.UMAMI_URL ?? "https://umami-inky-three.vercel.app";
+const UMAMI_USER = process.env.UMAMI_USERNAME ?? "admin";
+const UMAMI_PASS = process.env.UMAMI_PASSWORD;
+const UMAMI_WEBSITE_ID = process.env.UMAMI_WEBSITE_ID ?? "182bd53e-ea5c-4b20-9df7-e3dc0303f176";
+
+async function fetchUmamiVisits(): Promise<{ total: number; thisMonth: number }> {
+  try {
+    if (!UMAMI_PASS) return { total: 0, thisMonth: 0 };
+
+    const authRes = await fetch(`${UMAMI_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: UMAMI_USER, password: UMAMI_PASS }),
+    });
+    if (!authRes.ok) return { total: 0, thisMonth: 0 };
+    const { token } = await authRes.json() as { token: string };
+
+    const now = Date.now();
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+    const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
+
+    const [totalRes, monthRes] = await Promise.all([
+      fetch(`${UMAMI_URL}/api/websites/${UMAMI_WEBSITE_ID}/stats?startAt=${oneYearAgo}&endAt=${now}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch(`${UMAMI_URL}/api/websites/${UMAMI_WEBSITE_ID}/stats?startAt=${startOfMonth}&endAt=${now}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+
+    if (!totalRes.ok || !monthRes.ok) return { total: 0, thisMonth: 0 };
+
+    const totalData = await totalRes.json() as { visits?: { value: number } };
+    const monthData = await monthRes.json() as { visits?: { value: number } };
+
+    return {
+      total: totalData.visits?.value ?? 0,
+      thisMonth: monthData.visits?.value ?? 0,
+    };
+  } catch {
+    return { total: 0, thisMonth: 0 };
+  }
+}
+
 async function fetchCalBookings(status: string, limit = 100) {
   try {
     const res = await fetch(`${CALCOM_BASE}/bookings?status=${status}&limit=${limit}`, {
@@ -27,8 +71,8 @@ export async function GET() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    // Cal.com + Prisma en parallèle
-    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmTotal, dmThisMonth] =
+    // Cal.com + Prisma + Umami en parallèle
+    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmTotal, dmThisMonth, umamiVisits] =
       await Promise.all([
         fetchCalBookings("upcoming", 100),
         fetchCalBookings("past", 100),
@@ -44,6 +88,7 @@ export async function GET() {
         }),
         getPrisma().manychatDmEvent.count(),
         getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: startOfMonth } } }),
+        fetchUmamiVisits(),
       ]);
 
     // Stats calls
@@ -102,7 +147,7 @@ export async function GET() {
       funnel: {
         reelsViews,
         dmSent: dmTotal,
-        siteVisits: null,
+        siteVisits: umamiVisits.total,
         callsBooked: totalCallsBooked,
         clients: clients.length,
       },
@@ -111,6 +156,7 @@ export async function GET() {
         clients: clientsThisMonth,
         prospects: prospectsThisMonth,
         dmSent: dmThisMonth,
+        siteVisits: umamiVisits.thisMonth,
       },
       callSources: callSourcesWithClients,
       followersHistory,
