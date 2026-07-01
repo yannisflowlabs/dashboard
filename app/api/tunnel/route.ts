@@ -41,12 +41,12 @@ async function fetchUmamiVisits(): Promise<{ total: number; thisMonth: number }>
 
     if (!totalRes.ok || !monthRes.ok) return { total: 0, thisMonth: 0 };
 
-    const totalData = await totalRes.json() as { visits?: { value: number } };
-    const monthData = await monthRes.json() as { visits?: { value: number } };
+    const totalData = await totalRes.json() as { visits?: number };
+    const monthData = await monthRes.json() as { visits?: number };
 
     return {
-      total: totalData.visits?.value ?? 0,
-      thisMonth: monthData.visits?.value ?? 0,
+      total: totalData.visits ?? 0,
+      thisMonth: monthData.visits ?? 0,
     };
   } catch {
     return { total: 0, thisMonth: 0 };
