@@ -56,6 +56,7 @@ export async function GET() {
             industry: infoMap.get(c.email)!.industry,
             dealAmount: infoMap.get(c.email)!.dealAmount,
             signedAt: infoMap.get(c.email)!.signedAt,
+            status: infoMap.get(c.email)!.status,
           }
         : null,
     }));

@@ -8,8 +8,12 @@ const MODEL = "claude-sonnet-4-6";
 const SYSTEM_PROMPT = `Tu es un assistant qui analyse des transcripts d'appels commerciaux/clients pour Flow Labs (agence IA).
 À partir du transcript fourni, produis un résumé structuré en français avec ces sections (utilise du markdown) :
 
-## Points clés
-- (les éléments importants abordés)
+## Résumé en 5 points
+1. (point clé 1)
+2. (point clé 2)
+3. (point clé 3)
+4. (point clé 4)
+5. (point clé 5)
 
 ## Besoins du client
 - (ce dont le client a besoin)

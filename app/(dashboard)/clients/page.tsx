@@ -2,10 +2,21 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Search, Video, FileText, Sparkles, Plus, X, Check, Trash2,
-  Building2, Loader2, ExternalLink, ChevronRight, Link2,
+  Search, Video, FileText, Sparkles, Plus, Check, Trash2,
+  Building2, Loader2, ExternalLink, ChevronRight, Link2, Mail, Calendar,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
+
+const STATUS_OPTIONS = [
+  { key: "active",    label: "Actif",    color: "#2E5E28", bg: "rgba(46,94,40,0.10)",  border: "rgba(46,94,40,0.25)" },
+  { key: "paused",    label: "En pause", color: "#7A6010", bg: "rgba(200,160,20,0.10)", border: "rgba(200,160,20,0.30)" },
+  { key: "completed", label: "Terminé",  color: "#1A56B0", bg: "rgba(26,86,176,0.10)",  border: "rgba(26,86,176,0.25)" },
+  { key: "unpaid",    label: "Impayé",   color: "#7A3028", bg: "rgba(232,80,60,0.10)",  border: "rgba(232,80,60,0.25)" },
+];
+
+function getStatus(key: string) {
+  return STATUS_OPTIONS.find((s) => s.key === key) ?? STATUS_OPTIONS[0];
+}
 
 interface Call {
   id: number;
@@ -27,6 +38,7 @@ interface Business {
   industry: string | null;
   dealAmount: number | null;
   signedAt: string | null;
+  status: string;
 }
 interface Client {
   id: number;
@@ -43,12 +55,23 @@ interface DriveFile {
   createdTime: string;
   webViewLink: string;
 }
+interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  meetLink: string | null;
+  htmlLink: string | null;
+}
 
 function getInitials(name: string) {
   return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+}
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export default function ClientsPage() {
@@ -77,7 +100,6 @@ export default function ClientsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Recherche dans les transcripts (debounce)
   useEffect(() => {
     if (search.trim().length < 2) { setSearchResults([]); return; }
     const t = setTimeout(async () => {
@@ -88,7 +110,6 @@ export default function ClientsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  // Lire ?google=connected|error dans l'URL après callback OAuth
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const g = params.get("google");
@@ -102,10 +123,7 @@ export default function ClientsPage() {
 
   return (
     <div style={{ padding: "28px", height: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
-      <PageHeader
-        title="Suivi clients"
-        subtitle="Recordings, transcripts, notes et actions par client"
-      />
+      <PageHeader title="Suivi clients" subtitle="Recordings, transcripts, notes et actions par client" />
 
       {/* Bandeau Google Drive */}
       {googleConnected === false && (
@@ -124,12 +142,11 @@ export default function ClientsPage() {
       )}
       {googleConnected === true && (
         <div style={{
-          display: "flex", alignItems: "center", gap: 7,
-          padding: "8px 14px", background: "rgba(46,94,40,0.07)",
-          border: "1px solid rgba(46,94,40,0.2)", borderRadius: 10, marginBottom: 16, fontSize: 12,
-          color: "#2E5E28",
+          display: "flex", alignItems: "center", gap: 7, padding: "8px 14px",
+          background: "rgba(46,94,40,0.07)", border: "1px solid rgba(46,94,40,0.2)",
+          borderRadius: 10, marginBottom: 16, fontSize: 12, color: "#2E5E28",
         }}>
-          <Check size={13} /> Google Drive connecté — import automatique des transcripts disponible
+          <Check size={13} /> Google Drive connecté
         </div>
       )}
 
@@ -137,30 +154,15 @@ export default function ClientsPage() {
       <div style={{ position: "relative", marginBottom: 18, maxWidth: 480 }}>
         <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "var(--text-muted)" }} />
         <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Rechercher un mot dans tous les transcripts…"
-          style={{
-            width: "100%", padding: "9px 12px 9px 36px", border: "1px solid var(--border-color)",
-            borderRadius: 10, fontSize: 13, fontFamily: "inherit", outline: "none",
-            background: "#FFF", color: "var(--text-primary)", boxSizing: "border-box",
-          }}
+          style={{ width: "100%", padding: "9px 12px 9px 36px", border: "1px solid var(--border-color)", borderRadius: 10, fontSize: 13, fontFamily: "inherit", outline: "none", background: "#FFF", color: "var(--text-primary)", boxSizing: "border-box" }}
         />
         {searchResults.length > 0 && (
-          <div style={{
-            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30,
-            background: "#FFF", borderRadius: 10, border: "1px solid var(--border-color)",
-            boxShadow: "0 4px 20px rgba(0,0,0,0.1)", maxHeight: 300, overflowY: "auto",
-          }}>
+          <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, background: "#FFF", borderRadius: 10, border: "1px solid var(--border-color)", boxShadow: "0 4px 20px rgba(0,0,0,0.1)", maxHeight: 300, overflowY: "auto" }}>
             {searchResults.map((r) => (
-              <button key={r.callId}
-                onClick={() => { setSelectedEmail(r.clientEmail); setSearch(""); }}
-                style={{
-                  display: "block", width: "100%", textAlign: "left", padding: "10px 12px",
-                  border: "none", borderBottom: "1px solid var(--border-color)", background: "transparent",
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
+              <button key={r.callId} onClick={() => { setSelectedEmail(r.clientEmail); setSearch(""); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", border: "none", borderBottom: "1px solid var(--border-color)", background: "transparent", cursor: "pointer", fontFamily: "inherit" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{r.clientEmail} · {r.title ?? "Call"}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{r.excerpt}</div>
               </button>
@@ -176,7 +178,7 @@ export default function ClientsPage() {
         </div>
       ) : clients.length === 0 ? (
         <div style={{ padding: "40px", textAlign: "center", color: "var(--text-muted)", fontSize: 13, border: "1px dashed var(--border-color)", borderRadius: 12 }}>
-          Aucun client pour l&apos;instant. Passe un prospect au stage «&nbsp;Client&nbsp;» dans le CRM pour le voir apparaître ici.
+          Aucun client pour l&apos;instant. Passe un prospect au stage «&nbsp;Client&nbsp;» dans le CRM.
         </div>
       ) : (
         <div style={{ display: "flex", gap: 18, flex: 1, minHeight: 0 }}>
@@ -185,25 +187,16 @@ export default function ClientsPage() {
             {clients.map((c) => {
               const openActions = c.actions.filter((a) => !a.done).length;
               const isSel = c.email === selectedEmail;
+              const st = getStatus(c.business?.status ?? "active");
               return (
                 <button key={c.email} onClick={() => setSelectedEmail(c.email)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
-                    borderRadius: 10, border: `1px solid ${isSel ? "var(--text-primary)" : "var(--border-color)"}`,
-                    background: isSel ? "var(--text-primary)" : "#FFF", cursor: "pointer",
-                    textAlign: "left", fontFamily: "inherit", width: "100%",
-                  }}
-                >
-                  <div style={{
-                    width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
-                    background: isSel ? "rgba(255,255,255,0.2)" : "var(--surface-2, #F5F2EE)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 11, fontWeight: 800, color: isSel ? "#FFF" : "var(--text-primary)",
-                  }}>{getInitials(c.name)}</div>
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, border: `1px solid ${isSel ? "var(--text-primary)" : "var(--border-color)"}`, background: isSel ? "var(--text-primary)" : "#FFF", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", flexShrink: 0, background: isSel ? "rgba(255,255,255,0.2)" : "var(--surface-2, #F5F2EE)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: isSel ? "#FFF" : "var(--text-primary)" }}>{getInitials(c.name)}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: isSel ? "#FFF" : "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
-                    <div style={{ fontSize: 11, color: isSel ? "rgba(255,255,255,0.7)" : "var(--text-muted)" }}>
-                      {c.calls.length} call{c.calls.length > 1 ? "s" : ""}{openActions > 0 ? ` · ${openActions} action${openActions > 1 ? "s" : ""}` : ""}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: isSel ? "rgba(255,255,255,0.85)" : st.color, background: isSel ? "rgba(255,255,255,0.15)" : st.bg, border: `1px solid ${isSel ? "rgba(255,255,255,0.2)" : st.border}`, borderRadius: 4, padding: "1px 5px" }}>{st.label}</span>
+                      <span style={{ fontSize: 11, color: isSel ? "rgba(255,255,255,0.6)" : "var(--text-muted)" }}>{c.calls.length} call{c.calls.length > 1 ? "s" : ""}{openActions > 0 ? ` · ${openActions} action${openActions > 1 ? "s" : ""}` : ""}</span>
                     </div>
                   </div>
                   <ChevronRight size={14} style={{ color: isSel ? "rgba(255,255,255,0.7)" : "var(--text-muted)", flexShrink: 0 }} />
@@ -223,16 +216,103 @@ export default function ClientsPage() {
 }
 
 function ClientDetail({ client, onRefresh, googleConnected }: { client: Client; onRefresh: () => void; googleConnected: boolean }) {
+  const [nextEvent, setNextEvent] = useState<CalendarEvent | null | undefined>(undefined);
+
+  useEffect(() => {
+    setNextEvent(undefined);
+    if (!googleConnected) return;
+    const firstName = client.name.split(" ")[0];
+    fetch(`/api/google/calendar?name=${encodeURIComponent(firstName)}`)
+      .then((r) => r.json())
+      .then((d) => setNextEvent(d.event ?? null))
+      .catch(() => setNextEvent(null));
+  }, [client.email, client.name, googleConnected]);
+
+  const st = getStatus(client.business?.status ?? "active");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>{client.name}</h2>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{client.email}{client.phone ? ` · ${client.phone}` : ""}</div>
+      {/* En-tête client */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>{client.name}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
+            <a href={`mailto:${client.email}`} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)", textDecoration: "none" }}>
+              <Mail size={12} /> {client.email}
+            </a>
+            {client.phone && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{client.phone}</span>}
+          </div>
+        </div>
+        {/* Badge statut cliquable */}
+        <StatusBadge currentStatus={client.business?.status ?? "active"} clientEmail={client.email} onRefresh={onRefresh} />
       </div>
+
+      {/* Prochaine session Google Calendar */}
+      {googleConnected && nextEvent !== undefined && (
+        <div style={{ padding: "10px 14px", background: nextEvent ? "rgba(26,86,176,0.06)" : "var(--surface-2,#F9F7F4)", border: "1px solid var(--border-color)", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
+          <Calendar size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          {nextEvent === undefined ? (
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Chargement…</span>
+          ) : nextEvent ? (
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{nextEvent.summary}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>{formatDateTime(nextEvent.start)}</div>
+            </div>
+          ) : (
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Aucune session à venir dans Google Agenda</span>
+          )}
+          {nextEvent?.meetLink && (
+            <a href={nextEvent.meetLink} target="_blank" rel="noreferrer" style={{ ...primaryBtnStyle, fontSize: 11, padding: "5px 10px", textDecoration: "none", flexShrink: 0 }}>
+              Rejoindre
+            </a>
+          )}
+          {nextEvent?.htmlLink && !nextEvent.meetLink && (
+            <a href={nextEvent.htmlLink} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#1A56B0", textDecoration: "none", flexShrink: 0 }}>
+              Voir <ExternalLink size={10} style={{ display: "inline" }} />
+            </a>
+          )}
+        </div>
+      )}
 
       <BusinessCard client={client} onRefresh={onRefresh} />
       <ActionsCard client={client} onRefresh={onRefresh} />
       <CallsCard client={client} onRefresh={onRefresh} googleConnected={googleConnected} />
+    </div>
+  );
+}
+
+function StatusBadge({ currentStatus, clientEmail, onRefresh }: { currentStatus: string; clientEmail: string; onRefresh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const st = getStatus(currentStatus);
+
+  async function setStatus(key: string) {
+    setSaving(true); setOpen(false);
+    await fetch("/api/clients/business", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientEmail, status: key }),
+    });
+    setSaving(false); onRefresh();
+  }
+
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <button onClick={() => setOpen(!open)} disabled={saving}
+        style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, border: `1.5px solid ${st.border}`, background: st.bg, color: st.color, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+        {saving ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> : null}
+        {st.label} ▾
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 40, background: "#FFF", border: "1px solid var(--border-color)", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.1)", minWidth: 140, overflow: "hidden" }}>
+          {STATUS_OPTIONS.map((s) => (
+            <button key={s.key} onClick={() => setStatus(s.key)}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 12px", border: "none", borderBottom: "1px solid var(--border-color)", background: s.key === currentStatus ? s.bg : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: s.key === currentStatus ? 700 : 500, color: s.color, textAlign: "left" }}>
+              {s.key === currentStatus && <Check size={11} />}
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -322,12 +402,9 @@ function ActionsCard({ client, onRefresh }: { client: Client; onRefresh: () => v
         {client.actions.map((a) => (
           <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button onClick={() => toggle(a.id, a.done)}
-              style={{
-                width: 18, height: 18, borderRadius: 5, flexShrink: 0, cursor: "pointer",
-                border: `1.5px solid ${a.done ? "#2E5E28" : "var(--border-color)"}`,
-                background: a.done ? "#A8C5A0" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >{a.done && <Check size={12} color="#2E5E28" />}</button>
+              style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0, cursor: "pointer", border: `1.5px solid ${a.done ? "#2E5E28" : "var(--border-color)"}`, background: a.done ? "#A8C5A0" : "#FFF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {a.done && <Check size={12} color="#2E5E28" />}
+            </button>
             <span style={{ flex: 1, fontSize: 13, color: a.done ? "var(--text-muted)" : "var(--text-primary)", textDecoration: a.done ? "line-through" : "none" }}>{a.label}</span>
             <button onClick={() => del(a.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", opacity: 0.5, padding: 2 }}><Trash2 size={12} /></button>
           </div>
@@ -366,8 +443,6 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
   const [transcriptUrl, setTranscriptUrl] = useState("");
   const [transcriptText, setTranscriptText] = useState("");
   const [saving, setSaving] = useState(false);
-
-  // Drive search state
   const [driveFiles, setDriveFiles] = useState<DriveFile[]>([]);
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveSearched, setDriveSearched] = useState(false);
@@ -406,8 +481,6 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "var(--surface-2, #F9F7F4)", borderRadius: 8 }}>
       <input style={inputStyle} placeholder="Titre du call (ex: Call découverte)" value={title} onChange={(e) => setTitle(e.target.value)} />
-
-      {/* Import Google Drive */}
       {googleConnected && (
         <div>
           <button onClick={searchDrive} disabled={driveLoading}
@@ -421,10 +494,7 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
           {driveFiles.length > 0 && (
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
               {driveFiles.map((f) => (
-                <div key={f.id} style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "7px 10px", background: "#FFF", border: "1px solid var(--border-color)", borderRadius: 8,
-                }}>
+                <div key={f.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 10px", background: "#FFF", border: "1px solid var(--border-color)", borderRadius: 8 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
                     <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{formatDate(f.createdTime)}</div>
@@ -442,7 +512,6 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
           )}
         </div>
       )}
-
       <input style={inputStyle} placeholder="Lien recording Drive (optionnel)" value={recordingUrl} onChange={(e) => setRecordingUrl(e.target.value)} />
       <input style={inputStyle} placeholder="Lien transcript Google Doc (optionnel)" value={transcriptUrl} onChange={(e) => setTranscriptUrl(e.target.value)} />
       <textarea style={{ ...inputStyle, height: 80, resize: "none" }} placeholder="Coller le texte du transcript ici (ou utiliser l'import Drive ci-dessus)" value={transcriptText} onChange={(e) => setTranscriptText(e.target.value)} />
@@ -497,7 +566,6 @@ function CallItem({ call, onRefresh }: { call: Call; onRefresh: () => void }) {
   );
 }
 
-// Styles partagés
 const cardStyle: React.CSSProperties = { background: "#FFF", border: "1px solid var(--border-color)", borderRadius: 12, padding: 16 };
 const cardHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: "var(--text-primary)", marginBottom: 12 };
 const linkBtnStyle: React.CSSProperties = { fontSize: 11, color: "var(--text-muted)", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", padding: 0, fontFamily: "inherit" };

@@ -6,7 +6,7 @@ import { getPrisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { clientEmail, company, industry, dealAmount, signedAt } = body;
+    const { clientEmail, company, industry, dealAmount, signedAt, status } = body;
 
     if (!clientEmail) {
       return NextResponse.json({ error: "clientEmail requis" }, { status: 400 });
@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
       industry: industry ?? null,
       dealAmount: dealAmount !== undefined && dealAmount !== null && dealAmount !== "" ? Number(dealAmount) : null,
       signedAt: signedAt ? new Date(signedAt) : null,
+      ...(status !== undefined ? { status } : {}),
     };
 
     const info = await getPrisma().clientBusinessInfo.upsert({
