@@ -6,19 +6,22 @@ import { getPrisma } from "@/lib/prisma";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { clientEmail, company, industry, dealAmount, signedAt, status } = body;
+    const { clientEmail, company, industry, dealAmount, signedAt, status, sessionsTotal, sessionsDone, contextNote } = body;
 
     if (!clientEmail) {
       return NextResponse.json({ error: "clientEmail requis" }, { status: 400 });
     }
 
-    const data = {
-      company: company ?? null,
-      industry: industry ?? null,
-      dealAmount: dealAmount !== undefined && dealAmount !== null && dealAmount !== "" ? Number(dealAmount) : null,
-      signedAt: signedAt ? new Date(signedAt) : null,
-      ...(status !== undefined ? { status } : {}),
-    };
+    // Mise à jour partielle : on ne touche qu'aux champs fournis
+    const data: Record<string, unknown> = {};
+    if (company !== undefined) data.company = company || null;
+    if (industry !== undefined) data.industry = industry || null;
+    if (dealAmount !== undefined) data.dealAmount = dealAmount !== null && dealAmount !== "" ? Number(dealAmount) : null;
+    if (signedAt !== undefined) data.signedAt = signedAt ? new Date(signedAt) : null;
+    if (status !== undefined) data.status = status;
+    if (sessionsTotal !== undefined) data.sessionsTotal = sessionsTotal !== null && sessionsTotal !== "" ? Number(sessionsTotal) : null;
+    if (sessionsDone !== undefined) data.sessionsDone = Number(sessionsDone) || 0;
+    if (contextNote !== undefined) data.contextNote = contextNote || null;
 
     const info = await getPrisma().clientBusinessInfo.upsert({
       where: { clientEmail },

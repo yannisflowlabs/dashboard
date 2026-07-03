@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Search, Video, FileText, Sparkles, Plus, Check, Trash2,
   Building2, Loader2, ExternalLink, ChevronRight, Link2, Mail, Calendar,
-  ChevronDown,
+  ChevronDown, GraduationCap, StickyNote, Pencil,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 
@@ -12,7 +12,6 @@ const STATUS_OPTIONS = [
   { key: "active",    label: "Actif",    color: "#2E5E28", bg: "rgba(46,94,40,0.10)",  border: "rgba(46,94,40,0.25)" },
   { key: "paused",    label: "En pause", color: "#7A6010", bg: "rgba(200,160,20,0.10)", border: "rgba(200,160,20,0.30)" },
   { key: "completed", label: "Terminé",  color: "#1A56B0", bg: "rgba(26,86,176,0.10)",  border: "rgba(26,86,176,0.25)" },
-  { key: "unpaid",    label: "Impayé",   color: "#7A3028", bg: "rgba(232,80,60,0.10)",  border: "rgba(232,80,60,0.25)" },
 ];
 
 function getStatus(key: string) {
@@ -29,7 +28,7 @@ interface Call {
   notes: string | null;
 }
 interface Action { id: number; label: string; done: boolean; callId: number | null; }
-interface Business { company: string | null; industry: string | null; dealAmount: number | null; signedAt: string | null; status: string; }
+interface Business { company: string | null; industry: string | null; dealAmount: number | null; signedAt: string | null; status: string; sessionsTotal: number | null; sessionsDone: number; contextNote: string | null; }
 interface Client { id: number; name: string; email: string; phone: string | null; calls: Call[]; actions: Action[]; business: Business | null; }
 interface DriveFile { id: string; name: string; createdTime: string; webViewLink: string; }
 interface CalendarEvent { id: string; summary: string; start: string; end: string; meetLink: string | null; htmlLink: string | null; }
@@ -234,6 +233,12 @@ function ClientDetail({ client, onRefresh, googleConnected }: { client: Client; 
         <StatusBadge currentStatus={client.business?.status ?? "active"} clientEmail={client.email} onRefresh={onRefresh} />
       </div>
 
+      {/* Note de contexte */}
+      <ContextNote client={client} onRefresh={onRefresh} />
+
+      {/* Progression des sessions */}
+      <SessionsProgress client={client} onRefresh={onRefresh} />
+
       {/* 1. Prochaine session */}
       {googleConnected && (
         <div style={{ padding: "12px 14px", background: nextEvent ? "rgba(26,86,176,0.06)" : "var(--surface-2,#F9F7F4)", border: "1px solid var(--border-color)", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
@@ -263,6 +268,122 @@ function ClientDetail({ client, onRefresh, googleConnected }: { client: Client; 
 
       {/* 4. Infos business (collapsible) */}
       <BusinessCard client={client} onRefresh={onRefresh} />
+    </div>
+  );
+}
+
+function ContextNote({ client, onRefresh }: { client: Client; onRefresh: () => void }) {
+  const initial = client.business?.contextNote ?? "";
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  // Resync quand on change de client
+  useEffect(() => { setValue(client.business?.contextNote ?? ""); setEditing(false); }, [client.email, client.business?.contextNote]);
+
+  async function save() {
+    setSaving(true);
+    await fetch("/api/clients/business", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientEmail: client.email, contextNote: value }) });
+    setSaving(false); setEditing(false); onRefresh();
+  }
+
+  if (!editing && !initial) {
+    return (
+      <button onClick={() => setEditing(true)}
+        style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "1px dashed var(--border-color)", borderRadius: 10, background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--text-muted)", width: "fit-content" }}>
+        <StickyNote size={13} /> Ajouter une note de contexte
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ padding: "10px 14px", background: "rgba(200,160,20,0.06)", border: "1px solid rgba(200,160,20,0.22)", borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: editing ? 8 : 4 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "#7A6010", textTransform: "uppercase", letterSpacing: "0.4px" }}><StickyNote size={12} /> Note de contexte</span>
+        {!editing && <button onClick={() => setEditing(true)} style={{ background: "none", border: "none", cursor: "pointer", color: "#7A6010", padding: 2, opacity: 0.7 }}><Pencil size={12} /></button>}
+      </div>
+      {editing ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <textarea value={value} onChange={(e) => setValue(e.target.value)} autoFocus placeholder="Ex : préfère PayPal, dispo le soir, reconnue en Tunisie…"
+            style={{ width: "100%", minHeight: 60, padding: "8px 10px", border: "1px solid rgba(200,160,20,0.3)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "vertical", boxSizing: "border-box", background: "#FFF" }} />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={save} disabled={saving} style={primaryBtnStyle}>{saving ? "…" : "Enregistrer"}</button>
+            <button onClick={() => { setValue(initial); setEditing(false); }} style={secondaryBtnStyle}>Annuler</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{initial}</div>
+      )}
+    </div>
+  );
+}
+
+function SessionsProgress({ client, onRefresh }: { client: Client; onRefresh: () => void }) {
+  const done = client.business?.sessionsDone ?? 0;
+  const total = client.business?.sessionsTotal ?? null;
+  const [editing, setEditing] = useState(false);
+  const [doneVal, setDoneVal] = useState(done.toString());
+  const [totalVal, setTotalVal] = useState(total?.toString() ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDoneVal((client.business?.sessionsDone ?? 0).toString());
+    setTotalVal(client.business?.sessionsTotal?.toString() ?? "");
+    setEditing(false);
+  }, [client.email, client.business?.sessionsDone, client.business?.sessionsTotal]);
+
+  async function save() {
+    setSaving(true);
+    await fetch("/api/clients/business", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientEmail: client.email, sessionsDone: doneVal, sessionsTotal: totalVal }) });
+    setSaving(false); setEditing(false); onRefresh();
+  }
+
+  // Rien de configuré et pas en édition → invitation discrète
+  if (!editing && !total && done === 0) {
+    return (
+      <button onClick={() => setEditing(true)}
+        style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "1px dashed var(--border-color)", borderRadius: 10, background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 12, color: "var(--text-muted)", width: "fit-content" }}>
+        <GraduationCap size={13} /> Définir un parcours de sessions
+      </button>
+    );
+  }
+
+  const pct = total && total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+          <GraduationCap size={14} /> Progression du parcours
+        </span>
+        {!editing && <button onClick={() => setEditing(true)} style={linkBtnStyle}>Éditer</button>}
+      </div>
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>Réalisées</label>
+          <input type="number" min={0} value={doneVal} onChange={(e) => setDoneVal(e.target.value)}
+            style={{ width: 60, padding: "6px 8px", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+          <label style={{ fontSize: 12, color: "var(--text-muted)" }}>sur</label>
+          <input type="number" min={0} value={totalVal} onChange={(e) => setTotalVal(e.target.value)} placeholder="total"
+            style={{ width: 60, padding: "6px 8px", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
+          <button onClick={save} disabled={saving} style={{ ...primaryBtnStyle, padding: "6px 12px" }}>{saving ? "…" : "OK"}</button>
+          <button onClick={() => setEditing(false)} style={{ ...secondaryBtnStyle, padding: "6px 12px" }}>Annuler</button>
+        </div>
+      ) : (
+        <div>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text-primary)" }}>
+              {done}{total ? ` / ${total}` : ""} <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-muted)" }}>session{done > 1 ? "s" : ""}{total ? "" : " réalisée" + (done > 1 ? "s" : "")}</span>
+            </span>
+            {total ? <span style={{ fontSize: 12, fontWeight: 700, color: pct === 100 ? "#2E5E28" : "var(--text-muted)" }}>{pct}%</span> : null}
+          </div>
+          {total ? (
+            <div style={{ height: 8, background: "var(--surface-2, #F0EDE8)", borderRadius: 20, overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: pct === 100 ? "#A8C5A0" : "linear-gradient(90deg, var(--lavender, #B8B0E8), var(--sage, #A8C5A0))", borderRadius: 20, transition: "width 0.3s" }} />
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

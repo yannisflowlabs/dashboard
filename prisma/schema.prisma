@@ -93,13 +93,16 @@ model ClientAction {
 
 // Suivi clients : infos business (1 par client)
 model ClientBusinessInfo {
-  clientEmail String   @id // relie au Prospect par email
-  company     String?
-  industry    String?
-  dealAmount  Int?     // montant du deal en euros
-  signedAt    DateTime?
-  status      String   @default("active") // "active" | "paused" | "completed" | "unpaid"
-  updatedAt   DateTime @updatedAt
+  clientEmail   String   @id // relie au Prospect par email
+  company       String?
+  industry      String?
+  dealAmount    Int?     // montant du deal en euros
+  signedAt      DateTime?
+  status        String   @default("active") // "active" | "paused" | "completed"
+  sessionsTotal Int?     // nb total de sessions prévues (parcours formation)
+  sessionsDone  Int      @default(0) // nb de sessions réalisées
+  contextNote   String?  // note libre de contexte perso
+  updatedAt     DateTime @updatedAt
 }
 
 // Token OAuth Google (1 seul enregistrement, id=1)

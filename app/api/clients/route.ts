@@ -57,6 +57,9 @@ export async function GET() {
             dealAmount: infoMap.get(c.email)!.dealAmount,
             signedAt: infoMap.get(c.email)!.signedAt,
             status: infoMap.get(c.email)!.status,
+            sessionsTotal: infoMap.get(c.email)!.sessionsTotal,
+            sessionsDone: infoMap.get(c.email)!.sessionsDone,
+            contextNote: infoMap.get(c.email)!.contextNote,
           }
         : null,
     }));
