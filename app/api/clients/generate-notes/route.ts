@@ -70,9 +70,9 @@ export async function POST(req: NextRequest) {
     const data = (await res.json()) as { content: { text: string }[] };
     const fullText = data.content?.[0]?.text ?? "";
 
-    // Sépare les notes de la ligne ACTIONS
-    const actionsMatch = fullText.match(/ACTIONS:\s*(.*)$/s);
-    const notes = fullText.replace(/ACTIONS:.*$/s, "").trim();
+    // Sépare les notes de la ligne ACTIONS ([\s\S] évite le flag /s non supporté par la cible TS)
+    const actionsMatch = fullText.match(/ACTIONS:\s*([\s\S]*)$/);
+    const notes = fullText.replace(/ACTIONS:[\s\S]*$/, "").trim();
     const actionLabels = actionsMatch
       ? actionsMatch[1].split("|").map((a) => a.trim()).filter((a) => a.length > 0)
       : [];
