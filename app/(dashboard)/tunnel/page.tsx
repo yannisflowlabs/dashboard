@@ -6,6 +6,7 @@ import Panel from "@/components/ui/Panel";
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
 import FunnelChart from "@/components/charts/FunnelChart";
+import PeriodSelector, { currentMonthPeriod, type Period } from "@/components/ui/PeriodSelector";
 
 interface TunnelData {
   funnel: {
@@ -33,6 +34,7 @@ export default function TunnelPage() {
   const [data, setData] = useState<TunnelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>(currentMonthPeriod());
 
   // Édition manuelle des vues Reels (API Meta bloquée)
   const [editingReels, setEditingReels] = useState(false);
@@ -40,15 +42,16 @@ export default function TunnelPage() {
   const [savingReels, setSavingReels] = useState(false);
 
   useEffect(() => {
-    fetch("/api/tunnel")
+    setLoading(true);
+    fetch(`/api/tunnel?from=${period.from}&to=${period.to}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.error) setError(d.error);
-        else setData(d);
+        else { setData(d); setError(null); }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [period]);
 
   async function saveReelsViews() {
     const value = Number(reelsInput.replace(/\s/g, ""));
@@ -79,7 +82,7 @@ export default function TunnelPage() {
     {
       label: "Vues Reels",
       value: reelsViews,
-      sub: reelsViews > 0 ? "Total vues · saisie manuelle" : "À saisir manuellement",
+      sub: reelsViews > 0 ? "Total cumulé · saisie manuelle" : "À saisir manuellement",
       color: "#A8C5A0",
     },
     {
@@ -126,8 +129,8 @@ export default function TunnelPage() {
 
   const objectives = [
     { label: "Clients cible (2025)", current: clients, goal: 10, color: "var(--sage)" },
-    { label: "Calls/mois cible", current: data?.monthly.calls ?? 0, goal: 15, color: "var(--yellow)" },
-    { label: "DM/mois cible", current: data?.monthly.dmSent ?? 0, goal: 100, color: "var(--lavender)" },
+    { label: "Calls cible", current: data?.monthly.calls ?? 0, goal: 15, color: "var(--yellow)" },
+    { label: "DM cible", current: data?.monthly.dmSent ?? 0, goal: 100, color: "var(--lavender)" },
   ];
 
   const updatedLabel = data?.updatedAt
@@ -163,6 +166,7 @@ export default function TunnelPage() {
       <PageHeader
         title="Tunnel de conversion"
         subtitle="Vues Reels → DM ManyChat → Site web → Call → Client"
+        action={<PeriodSelector value={period} onChange={setPeriod} />}
       />
 
       {/* Status bar */}
@@ -283,7 +287,7 @@ export default function TunnelPage() {
         <KpiCard
           title="DM envoyés"
           value={dmSent > 0 ? dmSent.toLocaleString("fr-FR") : "—"}
-          sub={`${data?.monthly.dmSent ?? 0} ce mois`}
+          sub={`sur ${period.label.toLowerCase()}`}
           accent="lavender"
           icon={<MessageCircle size={15} />}
         />
@@ -304,7 +308,7 @@ export default function TunnelPage() {
         <KpiCard
           title="Clients signés"
           value={String(clients)}
-          sub={`${data?.monthly.clients ?? 0} ce mois`}
+          sub={`sur ${period.label.toLowerCase()}`}
           accent="sage"
           icon={<UserCheck size={15} />}
         />

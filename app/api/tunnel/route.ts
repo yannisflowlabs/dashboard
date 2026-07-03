@@ -14,42 +14,27 @@ const UMAMI_USER = process.env.UMAMI_USERNAME ?? "admin";
 const UMAMI_PASS = process.env.UMAMI_PASSWORD;
 const UMAMI_WEBSITE_ID = process.env.UMAMI_WEBSITE_ID ?? "182bd53e-ea5c-4b20-9df7-e3dc0303f176";
 
-async function fetchUmamiVisits(): Promise<{ total: number; thisMonth: number }> {
+// Visites Umami sur une plage de dates précise
+async function fetchUmamiVisits(startAt: number, endAt: number): Promise<number> {
   try {
-    if (!UMAMI_PASS) return { total: 0, thisMonth: 0 };
+    if (!UMAMI_PASS) return 0;
 
     const authRes = await fetch(`${UMAMI_URL}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: UMAMI_USER, password: UMAMI_PASS }),
     });
-    if (!authRes.ok) return { total: 0, thisMonth: 0 };
+    if (!authRes.ok) return 0;
     const { token } = await authRes.json() as { token: string };
 
-    const now = Date.now();
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
-    const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
-
-    const [totalRes, monthRes] = await Promise.all([
-      fetch(`${UMAMI_URL}/api/websites/${UMAMI_WEBSITE_ID}/stats?startAt=${oneYearAgo}&endAt=${now}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      fetch(`${UMAMI_URL}/api/websites/${UMAMI_WEBSITE_ID}/stats?startAt=${startOfMonth}&endAt=${now}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-    ]);
-
-    if (!totalRes.ok || !monthRes.ok) return { total: 0, thisMonth: 0 };
-
-    const totalData = await totalRes.json() as { visits?: number };
-    const monthData = await monthRes.json() as { visits?: number };
-
-    return {
-      total: totalData.visits ?? 0,
-      thisMonth: monthData.visits ?? 0,
-    };
+    const res = await fetch(`${UMAMI_URL}/api/websites/${UMAMI_WEBSITE_ID}/stats?startAt=${startAt}&endAt=${endAt}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return 0;
+    const data = await res.json() as { visits?: number };
+    return data.visits ?? 0;
   } catch {
-    return { total: 0, thisMonth: 0 };
+    return 0;
   }
 }
 
@@ -65,14 +50,26 @@ async function fetchCalBookings(status: string, limit = 100) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const url = new URL(req.url);
+
+    // Plage de dates : défaut = mois en cours
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    const rangeStart = fromParam ? new Date(fromParam + "T00:00:00") : new Date(now.getFullYear(), now.getMonth(), 1);
+    const rangeEnd = toParam ? new Date(toParam + "T23:59:59") : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+    const inRange = (d: Date | string) => {
+      const t = new Date(d).getTime();
+      return t >= rangeStart.getTime() && t <= rangeEnd.getTime();
+    };
+
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     // Cal.com + Prisma + Umami en parallèle
-    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmTotal, dmThisMonth, umamiVisits, reelsViewsMetric] =
+    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmInRange, umamiVisitsRange, reelsViewsMetric] =
       await Promise.all([
         fetchCalBookings("upcoming", 100),
         fetchCalBookings("past", 100),
@@ -86,23 +83,29 @@ export async function GET() {
           orderBy: { createdAt: "asc" },
           select: { followers: true, createdAt: true },
         }),
-        getPrisma().manychatDmEvent.count(),
-        getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: startOfMonth } } }),
-        fetchUmamiVisits(),
+        getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: rangeStart, lte: rangeEnd } } }),
+        fetchUmamiVisits(rangeStart.getTime(), rangeEnd.getTime()),
         getPrisma().manualMetric.findUnique({ where: { key: "reelsViews" } }),
       ]);
 
-    // Stats calls
-    const totalCallsBooked = upcoming.length + past.length;
-    const totalCallsDone = past.length;
-    const noShows = cancelled.length + rejected.length;
-    const callsThisMonth = [...upcoming, ...past].filter(
-      (b) => new Date(b.start as string) >= startOfMonth
-    ).length;
+    // Calls filtrés sur la plage (par date de début du call)
+    const upcomingR = upcoming.filter((b) => inRange(b.start as string));
+    const pastR = past.filter((b) => inRange(b.start as string));
+    const cancelledR = cancelled.filter((b) => inRange(b.start as string));
+    const rejectedR = rejected.filter((b) => inRange(b.start as string));
 
-    // Calls par source → croisement clients CRM
+    // Stats calls (sur la plage)
+    const totalCallsBooked = upcomingR.length + pastR.length;
+    const totalCallsDone = pastR.length;
+    const noShows = cancelledR.length + rejectedR.length;
+
+    // Clients & prospects sur la plage
+    const clientsInRange = clients.filter((c) => inRange(c.updatedAt));
+    const prospectsInRange = allProspects.filter((p) => inRange(p.createdAt));
+
+    // Calls par source → croisement clients CRM (sur la plage)
     const callSourceMap: Record<string, { calls: number; uids: Set<string> }> = {};
-    for (const b of [...past, ...upcoming]) {
+    for (const b of [...pastR, ...upcomingR]) {
       const title = (b.title as string) ?? "Direct";
       const key = title.length > 60 ? title.slice(0, 60) + "…" : title;
       if (!callSourceMap[key]) callSourceMap[key] = { calls: 0, uids: new Set() };
@@ -141,28 +144,28 @@ export async function GET() {
       followers: s.followers,
     }));
 
-    const clientsThisMonth = clients.filter((c) => new Date(c.updatedAt) >= startOfMonth).length;
-    const prospectsThisMonth = allProspects.filter((p) => new Date(p.createdAt) >= startOfMonth).length;
-
     return NextResponse.json({
       funnel: {
+        // reelsViews = compteur cumulé (saisie manuelle, pas d'historique daté)
         reelsViews,
-        dmSent: dmTotal,
-        siteVisits: umamiVisits.total,
+        dmSent: dmInRange,
+        siteVisits: umamiVisitsRange,
         callsBooked: totalCallsBooked,
-        clients: clients.length,
+        clients: clientsInRange.length,
       },
       monthly: {
-        calls: callsThisMonth,
-        clients: clientsThisMonth,
-        prospects: prospectsThisMonth,
-        dmSent: dmThisMonth,
-        siteVisits: umamiVisits.thisMonth,
+        calls: totalCallsBooked,
+        clients: clientsInRange.length,
+        prospects: prospectsInRange.length,
+        dmSent: dmInRange,
+        siteVisits: umamiVisitsRange,
       },
       callSources: callSourcesWithClients,
       followersHistory,
       noShows,
       totalCallsDone,
+      reelsIsCumulative: true,
+      range: { from: rangeStart.toISOString().slice(0, 10), to: rangeEnd.toISOString().slice(0, 10) },
       hasPlausible: !!process.env.PLAUSIBLE_API_KEY,
       updatedAt: new Date().toISOString(),
     });

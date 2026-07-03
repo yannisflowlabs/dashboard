@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, X, ChevronDown, User, Mail, Phone, FileText, Trash2, Loader2 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
+import PeriodSelector, { currentMonthPeriod, type Period } from "@/components/ui/PeriodSelector";
 
 type Stage = "prospect" | "call_booked" | "proposal_sent" | "client" | "lost" | "unqualified";
 
@@ -262,6 +263,7 @@ export default function CRMPage() {
   const [editProspect, setEditProspect] = useState<Prospect | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
+  const [period, setPeriod] = useState<Period>(currentMonthPeriod());
 
   const load = useCallback(async () => {
     try {
@@ -320,11 +322,19 @@ export default function CRMPage() {
     }
   };
 
-  const byStage = (stage: Stage) => prospects.filter(p => p.stage === stage);
+  // Filtrage par période (date de création du prospect)
+  const fromT = new Date(period.from + "T00:00:00").getTime();
+  const toT = new Date(period.to + "T23:59:59").getTime();
+  const visibleProspects = prospects.filter(p => {
+    const t = new Date(p.createdAt).getTime();
+    return t >= fromT && t <= toT;
+  });
+
+  const byStage = (stage: Stage) => visibleProspects.filter(p => p.stage === stage);
   const clients = byStage("client").length;
-  const pipeline = prospects.filter(p => !["client", "lost", "unqualified"].includes(p.stage)).length;
+  const pipeline = visibleProspects.filter(p => !["client", "lost", "unqualified"].includes(p.stage)).length;
   // Taux de conversion calculé hors non qualifiés (ils ne rentraient pas dans la cible)
-  const qualified = prospects.filter(p => p.stage !== "unqualified").length;
+  const qualified = visibleProspects.filter(p => p.stage !== "unqualified").length;
 
   return (
     <div style={{ padding: "28px", height: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
@@ -332,15 +342,18 @@ export default function CRMPage() {
         title="CRM Pipeline"
         subtitle="Prospects importés depuis Cal.com · Glisse les cartes pour changer de statut"
         action={
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <PeriodSelector value={period} onChange={setPeriod} />
           <button onClick={() => setShowAdd(true)}
             style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: "var(--radius-nav)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
             <Plus size={13} /> Nouveau prospect
           </button>
+          </div>
         }
       />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "14px", marginBottom: "20px" }}>
-        <KpiCard title="Total prospects" value={`${prospects.length}`} sub="Tous statuts confondus" accent="sage" />
+        <KpiCard title="Total prospects" value={`${visibleProspects.length}`} sub="Sur la période · tous statuts" accent="sage" />
         <KpiCard title="En pipeline" value={`${pipeline}`} sub="Hors clients, perdus, non qualifiés" accent="lavender" />
         <KpiCard title="Clients" value={`${clients}`} sub="Conversions réussies" accent="yellow" />
         <KpiCard title="Taux de conversion" value={qualified > 0 ? `${Math.round((clients / qualified) * 100)}%` : "—"} sub="Clients / prospects qualifiés" accent="coral" />
