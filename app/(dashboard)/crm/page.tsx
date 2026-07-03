@@ -5,7 +5,7 @@ import { Plus, X, ChevronDown, User, Mail, Phone, FileText, Trash2, Loader2 } fr
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
 
-type Stage = "prospect" | "call_booked" | "call_done" | "proposal_sent" | "client" | "lost" | "unqualified";
+type Stage = "prospect" | "call_booked" | "proposal_sent" | "client" | "lost" | "unqualified";
 
 interface Prospect {
   id: number;
@@ -22,7 +22,6 @@ interface Prospect {
 const STAGES: { key: Stage; label: string; color: string; bg: string; border: string }[] = [
   { key: "prospect",       label: "Prospect",            color: "#5A5A5A", bg: "#F5F2EE",                  border: "#E0D8CF" },
   { key: "call_booked",   label: "Call booké",           color: "#3E3680", bg: "rgba(184,176,232,0.12)",   border: "rgba(184,176,232,0.4)" },
-  { key: "call_done",     label: "Call fait",            color: "#1A5276", bg: "rgba(120,180,220,0.12)",   border: "rgba(120,180,220,0.4)" },
   { key: "proposal_sent", label: "Proposition envoyée",  color: "#7A5E10", bg: "rgba(240,200,96,0.12)",    border: "rgba(240,200,96,0.4)" },
   { key: "client",        label: "Client",               color: "#2E5E28", bg: "rgba(168,197,160,0.15)",   border: "rgba(168,197,160,0.5)" },
   { key: "lost",          label: "Perdu",                color: "#7A3028", bg: "rgba(232,160,144,0.12)",   border: "rgba(232,160,144,0.4)" },

@@ -82,7 +82,6 @@ export async function GET() {
       const attendees = (b.attendees as { name: string; email: string }[]) ?? [];
       const attendee = attendees[0];
       if (!attendee?.email) continue;
-      const isUpcoming = upcoming.includes(b);
       await getPrisma().prospect.upsert({
         where: { email: attendee.email },
         update: { name: attendee.name, calBookingUid: b.uid as string },
@@ -90,7 +89,7 @@ export async function GET() {
           name: attendee.name,
           email: attendee.email,
           source: "calcom",
-          stage: isUpcoming ? "call_booked" : "call_done",
+          stage: "call_booked",
           calBookingUid: b.uid as string,
         },
       });
