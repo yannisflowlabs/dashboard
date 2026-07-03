@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Search, Video, FileText, Sparkles, Plus, X, Check, Trash2,
-  Building2, Loader2, ExternalLink, ChevronRight,
+  Building2, Loader2, ExternalLink, ChevronRight, Link2,
 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 
@@ -37,6 +37,12 @@ interface Client {
   actions: Action[];
   business: Business | null;
 }
+interface DriveFile {
+  id: string;
+  name: string;
+  createdTime: string;
+  webViewLink: string;
+}
 
 function getInitials(name: string) {
   return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
@@ -51,13 +57,19 @@ export default function ClientsPage() {
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<{ callId: number; clientEmail: string; title: string | null; excerpt: string }[]>([]);
+  const [googleConnected, setGoogleConnected] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/clients");
-      const data = await res.json();
+      const [clientsRes, googleRes] = await Promise.all([
+        fetch("/api/clients"),
+        fetch("/api/google/status"),
+      ]);
+      const data = await clientsRes.json();
       setClients(data.clients ?? []);
       if (!selectedEmail && data.clients?.length) setSelectedEmail(data.clients[0].email);
+      const gData = await googleRes.json();
+      setGoogleConnected(gData.connected ?? false);
     } finally {
       setLoading(false);
     }
@@ -65,7 +77,7 @@ export default function ClientsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Recherche dans les transcripts (debounce léger)
+  // Recherche dans les transcripts (debounce)
   useEffect(() => {
     if (search.trim().length < 2) { setSearchResults([]); return; }
     const t = setTimeout(async () => {
@@ -76,6 +88,16 @@ export default function ClientsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  // Lire ?google=connected|error dans l'URL après callback OAuth
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get("google");
+    if (g) {
+      if (g === "connected") setGoogleConnected(true);
+      window.history.replaceState({}, "", "/clients");
+    }
+  }, []);
+
   const selected = clients.find((c) => c.email === selectedEmail) ?? null;
 
   return (
@@ -84,6 +106,32 @@ export default function ClientsPage() {
         title="Suivi clients"
         subtitle="Recordings, transcripts, notes et actions par client"
       />
+
+      {/* Bandeau Google Drive */}
+      {googleConnected === false && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 14px", background: "rgba(66,133,244,0.08)",
+          border: "1px solid rgba(66,133,244,0.25)", borderRadius: 10, marginBottom: 16, fontSize: 13,
+        }}>
+          <span style={{ color: "#1A56B0", display: "flex", alignItems: "center", gap: 7 }}>
+            <Link2 size={14} /> Connecte Google Drive pour importer les transcripts automatiquement
+          </span>
+          <a href="/api/auth/google" style={{ ...primaryBtnStyle, fontSize: 12, padding: "6px 12px", textDecoration: "none" }}>
+            Connecter Google
+          </a>
+        </div>
+      )}
+      {googleConnected === true && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 7,
+          padding: "8px 14px", background: "rgba(46,94,40,0.07)",
+          border: "1px solid rgba(46,94,40,0.2)", borderRadius: 10, marginBottom: 16, fontSize: 12,
+          color: "#2E5E28",
+        }}>
+          <Check size={13} /> Google Drive connecté — import automatique des transcripts disponible
+        </div>
+      )}
 
       {/* Recherche transcripts */}
       <div style={{ position: "relative", marginBottom: 18, maxWidth: 480 }}>
@@ -166,7 +214,7 @@ export default function ClientsPage() {
 
           {/* Détail client */}
           <div style={{ flex: 1, minWidth: 0, overflowY: "auto", paddingRight: 4 }}>
-            {selected && <ClientDetail client={selected} onRefresh={load} />}
+            {selected && <ClientDetail client={selected} onRefresh={load} googleConnected={googleConnected ?? false} />}
           </div>
         </div>
       )}
@@ -174,7 +222,7 @@ export default function ClientsPage() {
   );
 }
 
-function ClientDetail({ client, onRefresh }: { client: Client; onRefresh: () => void }) {
+function ClientDetail({ client, onRefresh, googleConnected }: { client: Client; onRefresh: () => void; googleConnected: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div>
@@ -184,7 +232,7 @@ function ClientDetail({ client, onRefresh }: { client: Client; onRefresh: () => 
 
       <BusinessCard client={client} onRefresh={onRefresh} />
       <ActionsCard client={client} onRefresh={onRefresh} />
-      <CallsCard client={client} onRefresh={onRefresh} />
+      <CallsCard client={client} onRefresh={onRefresh} googleConnected={googleConnected} />
     </div>
   );
 }
@@ -295,7 +343,7 @@ function ActionsCard({ client, onRefresh }: { client: Client; onRefresh: () => v
   );
 }
 
-function CallsCard({ client, onRefresh }: { client: Client; onRefresh: () => void }) {
+function CallsCard({ client, onRefresh, googleConnected }: { client: Client; onRefresh: () => void; googleConnected: boolean }) {
   const [showAdd, setShowAdd] = useState(false);
   return (
     <div style={cardStyle}>
@@ -303,7 +351,7 @@ function CallsCard({ client, onRefresh }: { client: Client; onRefresh: () => voi
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Video size={14} /> Historique des calls</span>
         <button onClick={() => setShowAdd(!showAdd)} style={linkBtnStyle}>{showAdd ? "Fermer" : "+ Ajouter"}</button>
       </div>
-      {showAdd && <AddCallForm client={client} onDone={() => { setShowAdd(false); onRefresh(); }} />}
+      {showAdd && <AddCallForm client={client} onDone={() => { setShowAdd(false); onRefresh(); }} googleConnected={googleConnected} />}
       <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: showAdd ? 12 : 0 }}>
         {client.calls.length === 0 && !showAdd && <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Aucun call enregistré.</div>}
         {client.calls.map((call) => <CallItem key={call.id} call={call} onRefresh={onRefresh} />)}
@@ -312,12 +360,37 @@ function CallsCard({ client, onRefresh }: { client: Client; onRefresh: () => voi
   );
 }
 
-function AddCallForm({ client, onDone }: { client: Client; onDone: () => void }) {
+function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDone: () => void; googleConnected: boolean }) {
   const [title, setTitle] = useState("");
   const [recordingUrl, setRecordingUrl] = useState("");
   const [transcriptUrl, setTranscriptUrl] = useState("");
   const [transcriptText, setTranscriptText] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Drive search state
+  const [driveFiles, setDriveFiles] = useState<DriveFile[]>([]);
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [driveSearched, setDriveSearched] = useState(false);
+  const [importingDoc, setImportingDoc] = useState<string | null>(null);
+
+  async function searchDrive() {
+    const firstName = client.name.split(" ")[0];
+    setDriveLoading(true); setDriveSearched(true);
+    const res = await fetch(`/api/google/drive?q=${encodeURIComponent(firstName)}`);
+    const data = await res.json();
+    setDriveFiles(data.files ?? []);
+    setDriveLoading(false);
+  }
+
+  async function importTranscript(file: DriveFile) {
+    setImportingDoc(file.id);
+    setTranscriptUrl(file.webViewLink);
+    if (!title) setTitle(file.name);
+    const res = await fetch(`/api/google/docs?docId=${file.id}`);
+    const data = await res.json();
+    if (data.transcript) setTranscriptText(data.transcript);
+    setImportingDoc(null);
+  }
 
   async function save() {
     setSaving(true);
@@ -327,14 +400,52 @@ function AddCallForm({ client, onDone }: { client: Client; onDone: () => void })
     });
     setSaving(false); onDone();
   }
+
   const inputStyle = { padding: "7px 10px", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none", width: "100%", boxSizing: "border-box" as const };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "var(--surface-2, #F9F7F4)", borderRadius: 8 }}>
       <input style={inputStyle} placeholder="Titre du call (ex: Call découverte)" value={title} onChange={(e) => setTitle(e.target.value)} />
+
+      {/* Import Google Drive */}
+      {googleConnected && (
+        <div>
+          <button onClick={searchDrive} disabled={driveLoading}
+            style={{ ...secondaryBtnStyle, display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            {driveLoading ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}
+            Rechercher dans Drive ({client.name.split(" ")[0]})
+          </button>
+          {driveSearched && !driveLoading && driveFiles.length === 0 && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Aucun fichier trouvé pour «&nbsp;{client.name.split(" ")[0]}&nbsp;».</div>
+          )}
+          {driveFiles.length > 0 && (
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+              {driveFiles.map((f) => (
+                <div key={f.id} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "7px 10px", background: "#FFF", border: "1px solid var(--border-color)", borderRadius: 8,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{formatDate(f.createdTime)}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0, marginLeft: 8 }}>
+                    <a href={f.webViewLink} target="_blank" rel="noreferrer" style={{ ...chipStyle, fontSize: 10 }}><ExternalLink size={10} /></a>
+                    <button onClick={() => importTranscript(f)} disabled={importingDoc === f.id}
+                      style={{ ...primaryBtnStyle, padding: "4px 10px", fontSize: 11 }}>
+                      {importingDoc === f.id ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> : "Importer"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <input style={inputStyle} placeholder="Lien recording Drive (optionnel)" value={recordingUrl} onChange={(e) => setRecordingUrl(e.target.value)} />
       <input style={inputStyle} placeholder="Lien transcript Google Doc (optionnel)" value={transcriptUrl} onChange={(e) => setTranscriptUrl(e.target.value)} />
-      <textarea style={{ ...inputStyle, height: 80, resize: "none" }} placeholder="Coller le texte du transcript ici (pour la recherche et les notes IA)" value={transcriptText} onChange={(e) => setTranscriptText(e.target.value)} />
+      <textarea style={{ ...inputStyle, height: 80, resize: "none" }} placeholder="Coller le texte du transcript ici (ou utiliser l'import Drive ci-dessus)" value={transcriptText} onChange={(e) => setTranscriptText(e.target.value)} />
       <button onClick={save} disabled={saving} style={primaryBtnStyle}>{saving ? "Enregistrement…" : "Ajouter le call"}</button>
     </div>
   );
