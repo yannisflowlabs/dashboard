@@ -11,12 +11,14 @@ import {
   Filter,
   Settings,
   LogOut,
+  UserCheck,
 } from "lucide-react";
 
 const navItems = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/finances", icon: TrendingUp, label: "Finances" },
   { href: "/crm", icon: Users, label: "CRM Pipeline" },
+  { href: "/clients", icon: UserCheck, label: "Suivi clients" },
   { href: "/calendrier", icon: Calendar, label: "Calendrier" },
   { href: "/instagram", icon: Camera, label: "Instagram" },
   { href: "/tunnel", icon: Filter, label: "Tunnel de conversion" },

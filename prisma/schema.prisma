@@ -56,9 +56,47 @@ model Prospect {
   email      String   @unique
   phone      String?
   source     String   @default("calcom") // "calcom" | "manual"
-  stage      String   @default("prospect") // "prospect" | "call_booked" | "call_done" | "proposal_sent" | "client" | "lost"
+  stage      String   @default("prospect") // "prospect" | "call_booked" | "proposal_sent" | "client" | "lost" | "unqualified"
   notes      String?
   calBookingUid String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+// Suivi clients : un call enregistré (recording + transcript + notes IA)
+model ClientCall {
+  id             Int      @id @default(autoincrement())
+  clientEmail    String   // relie au Prospect par email
+  title          String?  // titre du call (ex: "Call découverte")
+  callDate       DateTime @default(now())
+  recordingUrl   String?  // lien Drive de la vidéo (Google Meet)
+  transcriptUrl  String?  // lien Google Doc du transcript
+  transcriptText String?  // texte brut du transcript (pour la recherche + génération notes)
+  notes          String?  // notes structurées générées par Claude (ou saisies)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([clientEmail])
+}
+
+// Suivi clients : une action à faire (checklist cochable)
+model ClientAction {
+  id          Int      @id @default(autoincrement())
+  clientEmail String   // relie au Prospect par email
+  label       String
+  done        Boolean  @default(false)
+  callId      Int?     // optionnel : action issue d'un call précis
+  createdAt   DateTime @default(now())
+
+  @@index([clientEmail])
+}
+
+// Suivi clients : infos business (1 par client)
+model ClientBusinessInfo {
+  clientEmail String   @id // relie au Prospect par email
+  company     String?
+  industry    String?
+  dealAmount  Int?     // montant du deal en euros
+  signedAt    DateTime?
+  updatedAt   DateTime @updatedAt
 }
