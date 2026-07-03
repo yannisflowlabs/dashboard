@@ -5,7 +5,7 @@ import { Plus, X, ChevronDown, User, Mail, Phone, FileText, Trash2, Loader2 } fr
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
 
-type Stage = "prospect" | "call_booked" | "call_done" | "proposal_sent" | "client" | "lost";
+type Stage = "prospect" | "call_booked" | "call_done" | "proposal_sent" | "client" | "lost" | "unqualified";
 
 interface Prospect {
   id: number;
@@ -26,6 +26,7 @@ const STAGES: { key: Stage; label: string; color: string; bg: string; border: st
   { key: "proposal_sent", label: "Proposition envoyée",  color: "#7A5E10", bg: "rgba(240,200,96,0.12)",    border: "rgba(240,200,96,0.4)" },
   { key: "client",        label: "Client",               color: "#2E5E28", bg: "rgba(168,197,160,0.15)",   border: "rgba(168,197,160,0.5)" },
   { key: "lost",          label: "Perdu",                color: "#7A3028", bg: "rgba(232,160,144,0.12)",   border: "rgba(232,160,144,0.4)" },
+  { key: "unqualified",   label: "Non qualifié",         color: "#5A5A5A", bg: "rgba(150,150,150,0.10)",   border: "rgba(150,150,150,0.35)" },
 ];
 
 function getInitials(name: string) {
@@ -322,7 +323,9 @@ export default function CRMPage() {
 
   const byStage = (stage: Stage) => prospects.filter(p => p.stage === stage);
   const clients = byStage("client").length;
-  const pipeline = prospects.filter(p => !["client", "lost"].includes(p.stage)).length;
+  const pipeline = prospects.filter(p => !["client", "lost", "unqualified"].includes(p.stage)).length;
+  // Taux de conversion calculé hors non qualifiés (ils ne rentraient pas dans la cible)
+  const qualified = prospects.filter(p => p.stage !== "unqualified").length;
 
   return (
     <div style={{ padding: "28px", height: "100%", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
@@ -339,9 +342,9 @@ export default function CRMPage() {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "14px", marginBottom: "20px" }}>
         <KpiCard title="Total prospects" value={`${prospects.length}`} sub="Tous statuts confondus" accent="sage" />
-        <KpiCard title="En pipeline" value={`${pipeline}`} sub="Hors clients et perdus" accent="lavender" />
+        <KpiCard title="En pipeline" value={`${pipeline}`} sub="Hors clients, perdus, non qualifiés" accent="lavender" />
         <KpiCard title="Clients" value={`${clients}`} sub="Conversions réussies" accent="yellow" />
-        <KpiCard title="Taux de conversion" value={prospects.length > 0 ? `${Math.round((clients / prospects.length) * 100)}%` : "—"} sub="Prospects → Clients" accent="coral" />
+        <KpiCard title="Taux de conversion" value={qualified > 0 ? `${Math.round((clients / qualified) * 100)}%` : "—"} sub="Clients / prospects qualifiés" accent="coral" />
       </div>
 
       {loading ? (
