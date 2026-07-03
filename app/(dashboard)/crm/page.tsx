@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, X, ChevronDown, User, Mail, Phone, FileText, Trash2, Loader2 } from "lucide-react";
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
-import PeriodSelector, { currentMonthPeriod, type Period } from "@/components/ui/PeriodSelector";
+import PeriodSelector, { yearToDate, type Period } from "@/components/ui/PeriodSelector";
 
 type Stage = "prospect" | "call_booked" | "proposal_sent" | "client" | "lost" | "unqualified";
 
@@ -263,7 +263,7 @@ export default function CRMPage() {
   const [editProspect, setEditProspect] = useState<Prospect | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
-  const [period, setPeriod] = useState<Period>(currentMonthPeriod());
+  const [period, setPeriod] = useState<Period>(yearToDate());
 
   const load = useCallback(async () => {
     try {
