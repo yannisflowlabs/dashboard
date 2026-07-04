@@ -83,7 +83,7 @@ export async function GET(req: Request) {
         fetchCalBookings("past", 100),
         fetchCalBookings("cancelled", 100),
         fetchCalBookings("rejected", 100),
-        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { clientSince: { sort: "desc", nulls: "last" } } }),
+        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { createdAt: "desc" } }),
         getPrisma().prospect.findMany({ select: { stage: true, source: true, createdAt: true } }),
         getPrisma().instagramCache.findUnique({ where: { id: 1 } }),
         getPrisma().instagramSnapshot.findMany({
