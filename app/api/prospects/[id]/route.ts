@@ -5,19 +5,25 @@ import { getPrisma } from "@/lib/prisma";
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
-  const { stage, notes, name, phone, clientSince } = body;
+  const { stage, notes, name, phone, clientSince, stageUpdatedAt } = body;
+
+  // Saisie manuelle de stageUpdatedAt (date picker)
+  let stageUpdatedAtValue: Date | null | undefined = undefined;
+  if (stageUpdatedAt !== undefined) {
+    stageUpdatedAtValue = stageUpdatedAt ? new Date(stageUpdatedAt) : null;
+  } else if (stage !== undefined) {
+    // Changement de stage automatique → date du jour
+    stageUpdatedAtValue = new Date();
+  }
 
   // Auto-gestion clientSince selon le stage
   let clientSinceValue: Date | null | undefined = undefined;
   if (clientSince !== undefined) {
-    // Saisie manuelle (date picker) — null = effacer
     clientSinceValue = clientSince ? new Date(clientSince) : null;
   } else if (stage === "client") {
-    // Passage automatique en client → date du jour si pas déjà définie
     const current = await getPrisma().prospect.findUnique({ where: { id: Number(id) }, select: { clientSince: true } });
     if (!current?.clientSince) clientSinceValue = new Date();
   } else if (stage !== undefined && stage !== "client") {
-    // Retour arrière depuis client → on efface
     clientSinceValue = null;
   }
 
@@ -29,6 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(name !== undefined && { name }),
       ...(phone !== undefined && { phone }),
       ...(clientSinceValue !== undefined && { clientSince: clientSinceValue }),
+      ...(stageUpdatedAtValue !== undefined && { stageUpdatedAt: stageUpdatedAtValue }),
     },
   });
 

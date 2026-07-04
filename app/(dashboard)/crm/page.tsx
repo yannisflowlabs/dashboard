@@ -18,6 +18,7 @@ interface Prospect {
   notes: string | null;
   calBookingUid: string | null;
   clientSince: string | null;
+  stageUpdatedAt: string | null;
   createdAt: string;
 }
 
@@ -34,13 +35,14 @@ function getInitials(name: string) {
   return name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function ProspectCard({ prospect, onStageChange, onDelete, onEdit, onDragStart, onClientSinceChange }: {
+function ProspectCard({ prospect, onStageChange, onDelete, onEdit, onDragStart, onClientSinceChange, onStageUpdatedAtChange }: {
   prospect: Prospect;
   onStageChange: (id: number, stage: Stage) => void;
   onDelete: (id: number) => void;
   onEdit: (prospect: Prospect) => void;
   onDragStart: (id: number) => void;
   onClientSinceChange: (id: number, date: string | null) => void;
+  onStageUpdatedAtChange: (id: number, date: string | null) => void;
 }) {
   const [stageOpen, setStageOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -130,24 +132,33 @@ function ProspectCard({ prospect, onStageChange, onDelete, onEdit, onDragStart, 
         )}
       </div>
 
-      {prospect.stage === "client" && (
-        <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>
-            Date de signature
-          </div>
-          <input
-            type="date"
-            value={prospect.clientSince ? prospect.clientSince.slice(0, 10) : ""}
-            onChange={(e) => onClientSinceChange(prospect.id, e.target.value || null)}
-            style={{
-              width: "100%", padding: "5px 8px", fontSize: 12,
-              border: "1px solid var(--border-color)", borderRadius: 8,
-              fontFamily: "inherit", color: "var(--text-primary)",
-              background: "rgba(168,197,160,0.1)", boxSizing: "border-box",
-            }}
-          />
-        </div>
-      )}
+      <div style={{ marginTop: 8 }} onClick={e => e.stopPropagation()}>
+        {prospect.stage === "client" ? (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>
+              Date de signature
+            </div>
+            <input
+              type="date"
+              value={prospect.clientSince ? prospect.clientSince.slice(0, 10) : ""}
+              onChange={(e) => onClientSinceChange(prospect.id, e.target.value || null)}
+              style={{ width: "100%", padding: "5px 8px", fontSize: 12, border: "1px solid var(--border-color)", borderRadius: 8, fontFamily: "inherit", color: "var(--text-primary)", background: "rgba(168,197,160,0.1)", boxSizing: "border-box" as const }}
+            />
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>
+              Date dans ce stage
+            </div>
+            <input
+              type="date"
+              value={prospect.stageUpdatedAt ? prospect.stageUpdatedAt.slice(0, 10) : ""}
+              onChange={(e) => onStageUpdatedAtChange(prospect.id, e.target.value || null)}
+              style={{ width: "100%", padding: "5px 8px", fontSize: 12, border: "1px solid var(--border-color)", borderRadius: 8, fontFamily: "inherit", color: "var(--text-primary)", background: "var(--bg-cream)", boxSizing: "border-box" as const }}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -312,13 +323,6 @@ export default function CRMPage() {
   };
 
   const handleStageChange = async (id: number, stage: Stage) => {
-    // Optimistic update : si on passe en "client", pré-remplir clientSince avec aujourd'hui
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
-    setProspects(prev => prev.map(p => p.id === id
-      ? { ...p, stage, clientSince: stage === "client" && !p.clientSince ? todayStr : stage !== "client" ? null : p.clientSince }
-      : p
-    ));
     const res = await fetch(`/api/prospects/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -334,6 +338,15 @@ export default function CRMPage() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientSince: date }),
+    });
+  };
+
+  const handleStageUpdatedAtChange = async (id: number, date: string | null) => {
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, stageUpdatedAt: date } : p));
+    await fetch(`/api/prospects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageUpdatedAt: date }),
     });
   };
 
@@ -364,8 +377,10 @@ export default function CRMPage() {
   const fromT = new Date(period.from + "T00:00:00").getTime();
   const toT = new Date(period.to + "T23:59:59").getTime();
   const visibleProspects = prospects.filter(p => {
-    // Pour les clients : date de signature, sinon date de création
-    const ref = p.stage === "client" && p.clientSince ? p.clientSince : p.createdAt;
+    // Clients → clientSince, autres stages → stageUpdatedAt, fallback createdAt
+    const ref = p.stage === "client" && p.clientSince
+      ? p.clientSince
+      : (p.stageUpdatedAt ?? p.createdAt);
     const t = new Date(ref).getTime();
     return t >= fromT && t <= toT;
   });
@@ -438,6 +453,7 @@ export default function CRMPage() {
                       onEdit={setEditProspect}
                       onDragStart={setDragId}
                       onClientSinceChange={handleClientSinceChange}
+                      onStageUpdatedAtChange={handleStageUpdatedAtChange}
                     />
                   ))}
                   {cards.length === 0 && (

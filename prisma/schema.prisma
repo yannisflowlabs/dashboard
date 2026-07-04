@@ -59,7 +59,8 @@ model Prospect {
   stage      String   @default("prospect") // "prospect" | "call_booked" | "proposal_sent" | "client" | "lost" | "unqualified"
   notes      String?
   calBookingUid String?
-  clientSince   DateTime? // date de signature (auto quand stage→client, éditable manuellement)
+  clientSince     DateTime? // date de signature (auto quand stage→client, éditable manuellement)
+  stageUpdatedAt  DateTime? // date du dernier changement de stage (auto + éditable)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
