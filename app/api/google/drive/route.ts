@@ -12,11 +12,22 @@ export async function GET(req: NextRequest) {
     const auth = await getAuthenticatedClient();
     const drive = google.drive({ version: "v3", auth });
 
+    const safe = q.replace(/'/g, "\\'");
+    // On accepte Google Docs, .docx et PDF ; et on inclut les Drive partagés
+    const mimeFilter = [
+      "mimeType = 'application/vnd.google-apps.document'",
+      "mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'",
+      "mimeType = 'application/pdf'",
+    ].join(" or ");
+
     const res = await drive.files.list({
-      q: `name contains '${q.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.document' and trashed = false`,
-      fields: "files(id, name, createdTime, webViewLink)",
+      q: `name contains '${safe}' and (${mimeFilter}) and trashed = false`,
+      fields: "files(id, name, createdTime, webViewLink, mimeType)",
       orderBy: "createdTime desc",
-      pageSize: 10,
+      pageSize: 15,
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true,
+      corpora: "allDrives",
     });
 
     return NextResponse.json({ files: res.data.files ?? [] });

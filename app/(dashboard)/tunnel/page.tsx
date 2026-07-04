@@ -28,6 +28,9 @@ interface TunnelData {
   totalCallsDone: number;
   hasPlausible: boolean;
   updatedAt: string;
+  reelsMonthsWithData: string[];
+  reelsMissingMonths: string[];
+  coveredMonths: string[];
 }
 
 export default function TunnelPage() {
@@ -53,20 +56,37 @@ export default function TunnelPage() {
       .finally(() => setLoading(false));
   }, [period]);
 
+  // Détermine le mois à saisir : si la plage couvre un seul mois → ce mois,
+  // sinon on saisit mois par mois (editingMonth pointe sur le mois en cours d'édition)
+  const [editingMonth, setEditingMonth] = useState<string | null>(null);
+
+  function startEditReels() {
+    const months = data?.coveredMonths ?? [];
+    // Par défaut on édite le premier mois manquant, ou le dernier mois de la plage
+    const missing = data?.reelsMissingMonths ?? [];
+    const target = missing[0] ?? months[months.length - 1] ?? period.from.slice(0, 7);
+    setEditingMonth(target);
+    setReelsInput(String(data?.funnel.reelsViews ?? ""));
+    setEditingReels(true);
+  }
+
   async function saveReelsViews() {
     const value = Number(reelsInput.replace(/\s/g, ""));
     if (!Number.isFinite(value) || value < 0) return;
+    const month = editingMonth ?? period.from.slice(0, 7);
     setSavingReels(true);
     try {
-      await fetch("/api/manual-metrics", {
+      await fetch("/api/reels-views", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "reelsViews", value }),
+        body: JSON.stringify({ month, views: value }),
       });
-      setData((prev) =>
-        prev ? { ...prev, funnel: { ...prev.funnel, reelsViews: value } } : prev
-      );
+      // Refetch pour recalculer le total de la plage
+      const res = await fetch(`/api/tunnel?from=${period.from}&to=${period.to}`);
+      const d = await res.json();
+      if (!d.error) setData(d);
       setEditingReels(false);
+      setEditingMonth(null);
     } finally {
       setSavingReels(false);
     }
@@ -196,7 +216,7 @@ export default function TunnelPage() {
           </div>
         )}
 
-        {reelsViews === 0 && (
+        {(data?.reelsMissingMonths?.length ?? 0) > 0 && (
           <div style={{
             display: "flex", alignItems: "center", gap: "6px",
             padding: "8px 12px", background: "#F0F5EE",
@@ -204,7 +224,7 @@ export default function TunnelPage() {
           }}>
             <AlertCircle size={12} />
             <span>
-              Vues Reels à saisir manuellement (API Meta bloquée) — clique sur «&nbsp;Éditer&nbsp;» dans la carte Vues Reels ci-dessous.
+              Vues Reels manquantes pour {data!.reelsMissingMonths.map((m) => new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })).join(", ")} — clique sur «&nbsp;Éditer&nbsp;» pour les saisir.
             </span>
           </div>
         )}
@@ -223,7 +243,7 @@ export default function TunnelPage() {
             </div>
             {!editingReels && (
               <button
-                onClick={() => { setReelsInput(String(reelsViews || "")); setEditingReels(true); }}
+                onClick={startEditReels}
                 style={{
                   fontSize: 11, color: "var(--text-muted)", cursor: "pointer",
                   background: "none", border: "none", textDecoration: "underline", padding: 0,
@@ -235,20 +255,40 @@ export default function TunnelPage() {
           </div>
           {editingReels ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {editingMonth && (
+                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "capitalize" }}>
+                  {new Date(editingMonth + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+                </div>
+              )}
               <input
                 type="number"
                 min={0}
                 autoFocus
                 value={reelsInput}
                 onChange={(e) => setReelsInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") saveReelsViews(); if (e.key === "Escape") setEditingReels(false); }}
-                placeholder="Total des vues"
+                onKeyDown={(e) => { if (e.key === "Enter") saveReelsViews(); if (e.key === "Escape") { setEditingReels(false); setEditingMonth(null); } }}
+                placeholder="Vues du mois"
                 style={{
                   width: "100%", padding: "6px 8px", fontSize: 18, fontWeight: 700,
                   border: "1px solid var(--border)", borderRadius: "var(--radius-row)",
                   outline: "none",
                 }}
               />
+              {/* Si plusieurs mois dans la plage, permettre de choisir le mois */}
+              {(data?.coveredMonths?.length ?? 0) > 1 && (
+                <select
+                  value={editingMonth ?? ""}
+                  onChange={(e) => { setEditingMonth(e.target.value); setReelsInput(""); }}
+                  style={{ padding: "5px 8px", fontSize: 12, border: "1px solid var(--border)", borderRadius: "var(--radius-row)", fontFamily: "inherit" }}
+                >
+                  {data?.coveredMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
+                      {data.reelsMonthsWithData.includes(m) ? " ✓" : " (manquant)"}
+                    </option>
+                  ))}
+                </select>
+              )}
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={saveReelsViews}
@@ -262,7 +302,7 @@ export default function TunnelPage() {
                   {savingReels ? "..." : "Enregistrer"}
                 </button>
                 <button
-                  onClick={() => setEditingReels(false)}
+                  onClick={() => { setEditingReels(false); setEditingMonth(null); }}
                   style={{
                     padding: "5px 10px", fontSize: 12, cursor: "pointer",
                     background: "none", color: "var(--text-muted)",
@@ -279,7 +319,9 @@ export default function TunnelPage() {
                 {reelsViews > 0 ? reelsViews.toLocaleString("fr-FR") : "—"}
               </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                Saisie manuelle
+                {(data?.coveredMonths?.length ?? 0) > 1
+                  ? `${data?.reelsMonthsWithData.length ?? 0}/${data?.coveredMonths.length ?? 0} mois saisis`
+                  : "Saisie manuelle · par mois"}
               </div>
             </>
           )}

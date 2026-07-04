@@ -69,13 +69,21 @@ export async function GET(req: Request) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     // Cal.com + Prisma + Umami en parallèle
-    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmInRange, umamiVisitsRange, reelsViewsMetric] =
+    // Calcul des mois couverts par la plage (pour agréger les vues Reels mensuelles)
+    const coveredMonths: string[] = [];
+    const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+    while (cursor <= rangeEnd) {
+      coveredMonths.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+
+    const [upcoming, past, cancelled, rejected, clients, allProspects, igCache, snapshots, dmInRange, umamiVisitsRange, reelsMonthlyRecords] =
       await Promise.all([
         fetchCalBookings("upcoming", 100),
         fetchCalBookings("past", 100),
         fetchCalBookings("cancelled", 100),
         fetchCalBookings("rejected", 100),
-        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { updatedAt: "desc" } }),
+        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { createdAt: "desc" } }),
         getPrisma().prospect.findMany({ select: { stage: true, source: true, createdAt: true } }),
         getPrisma().instagramCache.findUnique({ where: { id: 1 } }),
         getPrisma().instagramSnapshot.findMany({
@@ -85,7 +93,7 @@ export async function GET(req: Request) {
         }),
         getPrisma().manychatDmEvent.count({ where: { triggeredAt: { gte: rangeStart, lte: rangeEnd } } }),
         fetchUmamiVisits(rangeStart.getTime(), rangeEnd.getTime()),
-        getPrisma().manualMetric.findUnique({ where: { key: "reelsViews" } }),
+        getPrisma().reelsMonthlyView.findMany({ where: { month: { in: coveredMonths } } }),
       ]);
 
     // Calls filtrés sur la plage (par date de début du call)
@@ -99,8 +107,8 @@ export async function GET(req: Request) {
     const totalCallsDone = pastR.length;
     const noShows = cancelledR.length + rejectedR.length;
 
-    // Clients & prospects sur la plage
-    const clientsInRange = clients.filter((c) => inRange(c.updatedAt));
+    // Clients & prospects sur la plage (filtrés sur createdAt — date d'entrée dans le CRM)
+    const clientsInRange = clients.filter((c) => inRange(c.createdAt));
     const prospectsInRange = allProspects.filter((p) => inRange(p.createdAt));
 
     // Calls par source → croisement clients CRM (sur la plage)
@@ -122,22 +130,12 @@ export async function GET(req: Request) {
       .sort((a, b) => b.calls - a.calls)
       .slice(0, 5);
 
-    // Instagram — vues Reels : priorité à la saisie manuelle (API Meta bloquée)
-    let reelsViews = reelsViewsMetric?.value ?? 0;
-    if (reelsViews === 0 && igCache) {
-      try {
-        const igData = JSON.parse(igCache.data) as { reelsViews?: number; recentPosts?: { type: string; views?: number; plays?: number }[] };
-        if (igData.reelsViews) {
-          reelsViews = igData.reelsViews;
-        } else if (igData.recentPosts) {
-          reelsViews = igData.recentPosts
-            .filter((p) => p.type === "Video" || p.type === "Reel")
-            .reduce((sum, p) => sum + (p.views ?? p.plays ?? 0), 0);
-        }
-      } catch {
-        reelsViews = 0;
-      }
-    }
+    // Vues Reels : somme des mois couverts (saisie manuelle par mois)
+    const reelsViews = reelsMonthlyRecords.reduce((sum, r) => sum + r.views, 0);
+    // Mois avec données saisies (pour affichage dans le frontend)
+    const reelsMonthsWithData = reelsMonthlyRecords.map((r) => r.month);
+    // Mois de la plage sans données (pour alerter l'utilisateur)
+    const reelsMissingMonths = coveredMonths.filter((m) => !reelsMonthsWithData.includes(m));
 
     const followersHistory = snapshots.map((s) => ({
       date: s.createdAt.toISOString().slice(0, 10),
@@ -164,8 +162,10 @@ export async function GET(req: Request) {
       followersHistory,
       noShows,
       totalCallsDone,
-      reelsIsCumulative: true,
+      reelsMonthsWithData,
+      reelsMissingMonths,
       range: { from: rangeStart.toISOString().slice(0, 10), to: rangeEnd.toISOString().slice(0, 10) },
+      coveredMonths,
       hasPlausible: !!process.env.PLAUSIBLE_API_KEY,
       updatedAt: new Date().toISOString(),
     });

@@ -105,6 +105,13 @@ model ClientBusinessInfo {
   updatedAt     DateTime @updatedAt
 }
 
+// Vues Reels par mois (saisie manuelle, une ligne par mois "YYYY-MM")
+model ReelsMonthlyView {
+  month     String   @id // ex: "2026-06"
+  views     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
 // Token OAuth Google (1 seul enregistrement, id=1)
 model GoogleToken {
   id           Int      @id @default(1)
