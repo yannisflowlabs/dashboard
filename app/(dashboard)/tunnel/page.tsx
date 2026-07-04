@@ -31,6 +31,7 @@ interface TunnelData {
   reelsMonthsWithData: string[];
   reelsMissingMonths: string[];
   coveredMonths: string[];
+  reelsMonthlyRecords: { month: string; views: number }[];
 }
 
 export default function TunnelPage() {
@@ -60,13 +61,14 @@ export default function TunnelPage() {
   // sinon on saisit mois par mois (editingMonth pointe sur le mois en cours d'édition)
   const [editingMonth, setEditingMonth] = useState<string | null>(null);
 
-  function startEditReels() {
+  function startEditReels(targetMonth?: string) {
     const months = data?.coveredMonths ?? [];
-    // Par défaut on édite le premier mois manquant, ou le dernier mois de la plage
     const missing = data?.reelsMissingMonths ?? [];
-    const target = missing[0] ?? months[months.length - 1] ?? period.from.slice(0, 7);
+    const target = targetMonth ?? missing[0] ?? months[months.length - 1] ?? period.from.slice(0, 7);
     setEditingMonth(target);
-    setReelsInput(String(data?.funnel.reelsViews ?? ""));
+    // Pré-remplir avec les vues existantes de CE mois uniquement (pas le total)
+    const existing = data?.reelsMonthlyRecords?.find((r: { month: string; views: number }) => r.month === target)?.views;
+    setReelsInput(existing !== undefined ? String(existing) : "");
     setEditingReels(true);
   }
 
@@ -243,7 +245,7 @@ export default function TunnelPage() {
             </div>
             {!editingReels && (
               <button
-                onClick={startEditReels}
+                onClick={() => startEditReels()}
                 style={{
                   fontSize: 11, color: "var(--text-muted)", cursor: "pointer",
                   background: "none", border: "none", textDecoration: "underline", padding: 0,
@@ -278,7 +280,12 @@ export default function TunnelPage() {
               {(data?.coveredMonths?.length ?? 0) > 1 && (
                 <select
                   value={editingMonth ?? ""}
-                  onChange={(e) => { setEditingMonth(e.target.value); setReelsInput(""); }}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    setEditingMonth(m);
+                    const existing = data?.reelsMonthlyRecords?.find((r) => r.month === m)?.views;
+                    setReelsInput(existing !== undefined ? String(existing) : "");
+                  }}
                   style={{ padding: "5px 8px", fontSize: 12, border: "1px solid var(--border)", borderRadius: "var(--radius-row)", fontFamily: "inherit" }}
                 >
                   {data?.coveredMonths.map((m) => (

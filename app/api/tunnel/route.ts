@@ -164,6 +164,7 @@ export async function GET(req: Request) {
       totalCallsDone,
       reelsMonthsWithData,
       reelsMissingMonths,
+      reelsMonthlyRecords: reelsMonthlyRecords.map((r) => ({ month: r.month, views: r.views })),
       range: { from: rangeStart.toISOString().slice(0, 10), to: rangeEnd.toISOString().slice(0, 10) },
       coveredMonths,
       hasPlausible: !!process.env.PLAUSIBLE_API_KEY,
