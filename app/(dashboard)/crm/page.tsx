@@ -364,7 +364,9 @@ export default function CRMPage() {
   const fromT = new Date(period.from + "T00:00:00").getTime();
   const toT = new Date(period.to + "T23:59:59").getTime();
   const visibleProspects = prospects.filter(p => {
-    const t = new Date(p.createdAt).getTime();
+    // Pour les clients : date de signature, sinon date de création
+    const ref = p.stage === "client" && p.clientSince ? p.clientSince : p.createdAt;
+    const t = new Date(ref).getTime();
     return t >= fromT && t <= toT;
   });
 
