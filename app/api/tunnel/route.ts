@@ -83,7 +83,7 @@ export async function GET(req: Request) {
         fetchCalBookings("past", 100),
         fetchCalBookings("cancelled", 100),
         fetchCalBookings("rejected", 100),
-        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { createdAt: "desc" } }),
+        getPrisma().prospect.findMany({ where: { stage: "client" }, orderBy: { clientSince: { sort: "desc", nulls: "last" } } }),
         getPrisma().prospect.findMany({ select: { stage: true, source: true, createdAt: true } }),
         getPrisma().instagramCache.findUnique({ where: { id: 1 } }),
         getPrisma().instagramSnapshot.findMany({
@@ -107,8 +107,8 @@ export async function GET(req: Request) {
     const totalCallsDone = pastR.length;
     const noShows = cancelledR.length + rejectedR.length;
 
-    // Clients & prospects sur la plage (filtrés sur createdAt — date d'entrée dans le CRM)
-    const clientsInRange = clients.filter((c) => inRange(c.createdAt));
+    // Clients filtrés sur clientSince (date de signature), fallback createdAt si non défini
+    const clientsInRange = clients.filter((c) => inRange(c.clientSince ?? c.createdAt));
     const prospectsInRange = allProspects.filter((p) => inRange(p.createdAt));
 
     // Calls par source → croisement clients CRM (sur la plage)
