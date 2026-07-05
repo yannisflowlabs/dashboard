@@ -1,26 +1,36 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TrendingUp, MessageCircle, PhoneCall, UserCheck, AlertCircle, Wifi, Loader2, Play } from "lucide-react";
+import { TrendingUp, TrendingDown, MessageCircle, PhoneCall, UserCheck, AlertCircle, Wifi, Loader2, Play, Euro, Clock, Target, Lightbulb } from "lucide-react";
 import Panel from "@/components/ui/Panel";
 import PageHeader from "@/components/ui/PageHeader";
 import KpiCard from "@/components/ui/KpiCard";
-import FunnelChart from "@/components/charts/FunnelChart";
+import FunnelChartV2, { type FunnelStepV2 } from "@/components/charts/FunnelChartV2";
 import PeriodSelector, { currentMonthPeriod, type Period } from "@/components/ui/PeriodSelector";
 
+interface FunnelNums {
+  reelsViews: number;
+  dmSent: number;
+  siteVisits: number | null;
+  callsBooked: number;
+  callsDone: number;
+  clients: number;
+}
+
 interface TunnelData {
-  funnel: {
-    reelsViews: number;
-    dmSent: number;
-    siteVisits: number | null;
-    callsBooked: number;
-    clients: number;
-  };
+  funnel: FunnelNums;
+  previous: FunnelNums;
+  previousRange: { from: string; to: string };
   monthly: {
     calls: number;
     clients: number;
     prospects: number;
     dmSent: number;
+  };
+  business: {
+    totalRevenue: number;
+    avgDealSize: number;
+    avgVelocityDays: number | null;
   };
   callSources: { source: string; calls: number; clients: number }[];
   followersHistory: { date: string; followers: number }[];
@@ -34,6 +44,12 @@ interface TunnelData {
   reelsMonthlyRecords: { month: string; views: number }[];
 }
 
+// Petit indicateur de variation vs période précédente
+function deltaPct(cur: number, prev: number): number | null {
+  if (prev <= 0) return cur > 0 ? 100 : null;
+  return Math.round(((cur - prev) / prev) * 100);
+}
+
 export default function TunnelPage() {
   const [data, setData] = useState<TunnelData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,6 +60,7 @@ export default function TunnelPage() {
   const [editingReels, setEditingReels] = useState(false);
   const [reelsInput, setReelsInput] = useState("");
   const [savingReels, setSavingReels] = useState(false);
+  const [editingMonth, setEditingMonth] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -57,17 +74,12 @@ export default function TunnelPage() {
       .finally(() => setLoading(false));
   }, [period]);
 
-  // Détermine le mois à saisir : si la plage couvre un seul mois → ce mois,
-  // sinon on saisit mois par mois (editingMonth pointe sur le mois en cours d'édition)
-  const [editingMonth, setEditingMonth] = useState<string | null>(null);
-
   function startEditReels(targetMonth?: string) {
     const months = data?.coveredMonths ?? [];
     const missing = data?.reelsMissingMonths ?? [];
     const target = targetMonth ?? missing[0] ?? months[months.length - 1] ?? period.from.slice(0, 7);
     setEditingMonth(target);
-    // Pré-remplir avec les vues existantes de CE mois uniquement (pas le total)
-    const existing = data?.reelsMonthlyRecords?.find((r: { month: string; views: number }) => r.month === target)?.views;
+    const existing = data?.reelsMonthlyRecords?.find((r) => r.month === target)?.views;
     setReelsInput(existing !== undefined ? String(existing) : "");
     setEditingReels(true);
   }
@@ -83,7 +95,6 @@ export default function TunnelPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, views: value }),
       });
-      // Refetch pour recalculer le total de la plage
       const res = await fetch(`/api/tunnel?from=${period.from}&to=${period.to}`);
       const d = await res.json();
       if (!d.error) setData(d);
@@ -94,65 +105,42 @@ export default function TunnelPage() {
     }
   }
 
-  const reelsViews = data?.funnel.reelsViews ?? 0;
-  const dmSent = data?.funnel.dmSent ?? 0;
-  const siteVisits = data?.funnel.siteVisits ?? null;
-  const callsBooked = data?.funnel.callsBooked ?? 0;
-  const clients = data?.funnel.clients ?? 0;
+  const f = data?.funnel;
+  const prev = data?.previous;
+  const reelsViews = f?.reelsViews ?? 0;
+  const dmSent = f?.dmSent ?? 0;
+  const siteVisits = f?.siteVisits ?? null;
+  const callsBooked = f?.callsBooked ?? 0;
+  const callsDone = f?.callsDone ?? 0;
+  const clients = f?.clients ?? 0;
 
-  const funnelSteps = [
-    {
-      label: "Vues Reels",
-      value: reelsViews,
-      sub: reelsViews > 0 ? "Total cumulé · saisie manuelle" : "À saisir manuellement",
-      color: "#A8C5A0",
-    },
-    {
-      label: "DM envoyés",
-      value: dmSent,
-      sub: dmSent > 0 ? "Via ManyChat · webhook" : "En attente du premier DM",
-      color: "#C5B8E8",
-    },
-    {
-      label: "Visites site web",
-      value: siteVisits ?? 0,
-      sub: siteVisits !== null ? "Via Umami Analytics" : "Umami non configuré",
-      color: "#F0C860",
-    },
-    {
-      label: "Calls réservés",
-      value: callsBooked,
-      sub: "Via Cal.com · tous statuts",
-      color: "#B8B0E8",
-    },
-    {
-      label: "Clients signés",
-      value: clients,
-      sub: "Stage «client» dans le CRM",
-      color: "#E8A090",
-    },
+  // Étapes de l'entonnoir (6 étapes avec calls réalisés)
+  const funnelSteps: FunnelStepV2[] = [
+    { key: "views", label: "Vues Reels", value: reelsViews, previous: prev?.reelsViews, color: "#A8C5A0", sub: "saisie manuelle" },
+    { key: "dm", label: "DM envoyés", value: dmSent, previous: prev?.dmSent, color: "#C5B8E8", sub: "ManyChat", goal: 100 },
+    { key: "site", label: "Visites site", value: siteVisits ?? 0, previous: prev?.siteVisits, color: "#F0C860", sub: "Umami" },
+    { key: "booked", label: "Calls réservés", value: callsBooked, previous: prev?.callsBooked, color: "#B8B0E8", sub: "Cal.com", goal: 15 },
+    { key: "done", label: "Calls réalisés", value: callsDone, previous: prev?.callsDone, color: "#8F9FE0", sub: "présents" },
+    { key: "clients", label: "Clients signés", value: clients, previous: prev?.clients, color: "#E8A090", sub: "CRM", goal: 10 },
   ];
 
-  const globalConv = reelsViews > 0
-    ? ((clients / reelsViews) * 100).toFixed(3)
-    : "—";
-  const dmToSite = dmSent > 0 && siteVisits !== null
-    ? Math.round((siteVisits / dmSent) * 100)
-    : null;
-  const callConv = callsBooked > 0
-    ? Math.round((clients / callsBooked) * 100)
-    : 0;
-  const siteToCall = siteVisits !== null && siteVisits > 0
-    ? Math.round((callsBooked / siteVisits) * 100)
-    : null;
-  const viewsToDm = reelsViews > 0 && dmSent > 0
-    ? ((dmSent / reelsViews) * 100).toFixed(1)
-    : null;
+  const globalConv = reelsViews > 0 ? ((clients / reelsViews) * 100).toFixed(3) : "—";
+  const callConv = callsBooked > 0 ? Math.round((clients / callsBooked) * 100) : 0;
+  const showRate = callsBooked > 0 ? Math.round((callsDone / callsBooked) * 100) : 0;
+  const viewsToDm = reelsViews > 0 && dmSent > 0 ? ((dmSent / reelsViews) * 100).toFixed(1) : null;
+
+  // Deltas vs période précédente
+  const dClients = prev ? deltaPct(clients, prev.clients) : null;
+  const dCalls = prev ? deltaPct(callsBooked, prev.callsBooked) : null;
+  const dDm = prev ? deltaPct(dmSent, prev.dmSent) : null;
+  const dReels = prev ? deltaPct(reelsViews, prev.reelsViews) : null;
+
+  const business = data?.business;
 
   const objectives = [
-    { label: "Clients cible (2025)", current: clients, goal: 10, color: "var(--sage)" },
-    { label: "Calls cible", current: data?.monthly.calls ?? 0, goal: 15, color: "var(--yellow)" },
-    { label: "DM cible", current: data?.monthly.dmSent ?? 0, goal: 100, color: "var(--lavender)" },
+    { label: "Clients cible (2026)", current: clients, goal: 10, color: "var(--sage)" },
+    { label: "Calls cible", current: callsBooked, goal: 15, color: "var(--yellow)" },
+    { label: "DM cible", current: dmSent, goal: 100, color: "var(--lavender)" },
   ];
 
   const updatedLabel = data?.updatedAt
@@ -171,11 +159,7 @@ export default function TunnelPage() {
   if (error) {
     return (
       <div style={{ padding: "28px" }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: "8px",
-          padding: "12px 16px", background: "#FFF0EE",
-          borderRadius: "var(--radius-row)", fontSize: 13, color: "#8B2E22",
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px 16px", background: "#FFF0EE", borderRadius: "var(--radius-row)", fontSize: 13, color: "#8B2E22" }}>
           <AlertCircle size={14} />
           Erreur : {error}
         </div>
@@ -187,70 +171,39 @@ export default function TunnelPage() {
     <div style={{ padding: "28px 28px", maxWidth: 1100 }}>
       <PageHeader
         title="Tunnel de conversion"
-        subtitle="Vues Reels → DM ManyChat → Site web → Call → Client"
+        subtitle="Vues Reels → DM → Site → Call réservé → Call réalisé → Client"
         action={<PeriodSelector value={period} onChange={setPeriod} />}
       />
 
       {/* Status bar */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px", flexWrap: "wrap" }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: "6px",
-          padding: "8px 12px", background: "#F0F7EF",
-          borderRadius: "var(--radius-row)", fontSize: 12, color: "#2E5E28",
-        }}>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", background: "#F0F7EF", borderRadius: "var(--radius-row)", fontSize: 12, color: "#2E5E28" }}>
           <Wifi size={12} />
           <span>
-            Cal.com · {callsBooked} calls · {clients} clients CRM · {dmSent} DM loggés
+            Cal.com · {callsBooked} réservés · {callsDone} réalisés · {clients} clients · {dmSent} DM
             {updatedLabel && ` · ${updatedLabel}`}
           </span>
         </div>
-
-        {dmSent === 0 && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: "6px",
-            padding: "8px 12px", background: "var(--yellow-light)",
-            borderRadius: "var(--radius-row)", fontSize: 12, color: "#7A5E10",
-          }}>
-            <AlertCircle size={12} />
-            <span>
-              Webhook ManyChat non encore déclenché — configure l'URL dans ton flow ManyChat.
-            </span>
-          </div>
-        )}
-
         {(data?.reelsMissingMonths?.length ?? 0) > 0 && (
-          <div style={{
-            display: "flex", alignItems: "center", gap: "6px",
-            padding: "8px 12px", background: "#F0F5EE",
-            borderRadius: "var(--radius-row)", fontSize: 12, color: "#3E5A38",
-          }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", background: "#F0F5EE", borderRadius: "var(--radius-row)", fontSize: 12, color: "#3E5A38" }}>
             <AlertCircle size={12} />
             <span>
-              Vues Reels manquantes pour {data!.reelsMissingMonths.map((m) => new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })).join(", ")} — clique sur «&nbsp;Éditer&nbsp;» pour les saisir.
+              Vues Reels manquantes pour {data!.reelsMissingMonths.map((m) => new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })).join(", ")} — clique sur «&nbsp;Éditer&nbsp;».
             </span>
           </div>
         )}
       </div>
 
-      {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "12px", marginBottom: "20px" }}>
-        <div style={{
-          position: "relative",
-          background: "var(--card)", border: "1px solid var(--border)",
-          borderRadius: "var(--radius-card)", padding: "14px 16px",
-        }}>
+      {/* KPIs avec deltas vs période précédente */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "10px", marginBottom: "16px" }}>
+        {/* Carte Vues Reels éditable */}
+        <div style={{ position: "relative", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", padding: "14px 16px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>
-              <Play size={15} /> Vues Reels
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>
+              <Play size={14} /> Vues
             </div>
             {!editingReels && (
-              <button
-                onClick={() => startEditReels()}
-                style={{
-                  fontSize: 11, color: "var(--text-muted)", cursor: "pointer",
-                  background: "none", border: "none", textDecoration: "underline", padding: 0,
-                }}
-              >
+              <button onClick={() => startEditReels()} style={{ fontSize: 10, color: "var(--text-muted)", cursor: "pointer", background: "none", border: "none", textDecoration: "underline", padding: 0 }}>
                 Éditer
               </button>
             )}
@@ -258,324 +211,214 @@ export default function TunnelPage() {
           {editingReels ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {editingMonth && (
-                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, textTransform: "capitalize" }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, textTransform: "capitalize" }}>
                   {new Date(editingMonth + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
                 </div>
               )}
-              <input
-                type="number"
-                min={0}
-                autoFocus
-                value={reelsInput}
+              <input type="number" min={0} autoFocus value={reelsInput}
                 onChange={(e) => setReelsInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") saveReelsViews(); if (e.key === "Escape") { setEditingReels(false); setEditingMonth(null); } }}
-                placeholder="Vues du mois"
-                style={{
-                  width: "100%", padding: "6px 8px", fontSize: 18, fontWeight: 700,
-                  border: "1px solid var(--border)", borderRadius: "var(--radius-row)",
-                  outline: "none",
-                }}
-              />
-              {/* Si plusieurs mois dans la plage, permettre de choisir le mois */}
+                placeholder="Vues"
+                style={{ width: "100%", padding: "5px 7px", fontSize: 15, fontWeight: 700, border: "1px solid var(--border)", borderRadius: "var(--radius-row)", outline: "none" }} />
               {(data?.coveredMonths?.length ?? 0) > 1 && (
-                <select
-                  value={editingMonth ?? ""}
+                <select value={editingMonth ?? ""}
                   onChange={(e) => {
                     const m = e.target.value;
                     setEditingMonth(m);
                     const existing = data?.reelsMonthlyRecords?.find((r) => r.month === m)?.views;
                     setReelsInput(existing !== undefined ? String(existing) : "");
                   }}
-                  style={{ padding: "5px 8px", fontSize: 12, border: "1px solid var(--border)", borderRadius: "var(--radius-row)", fontFamily: "inherit" }}
-                >
+                  style={{ padding: "4px 6px", fontSize: 11, border: "1px solid var(--border)", borderRadius: "var(--radius-row)", fontFamily: "inherit" }}>
                   {data?.coveredMonths.map((m) => (
                     <option key={m} value={m}>
-                      {new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}
-                      {data.reelsMonthsWithData.includes(m) ? " ✓" : " (manquant)"}
+                      {new Date(m + "-01T12:00:00").toLocaleDateString("fr-FR", { month: "short", year: "2-digit" })}
+                      {data.reelsMonthsWithData.includes(m) ? " ✓" : " ⚠"}
                     </option>
                   ))}
                 </select>
               )}
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  onClick={saveReelsViews}
-                  disabled={savingReels}
-                  style={{
-                    flex: 1, padding: "5px", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    background: "#A8C5A0", color: "#1a2e1a", border: "none",
-                    borderRadius: "var(--radius-row)", opacity: savingReels ? 0.6 : 1,
-                  }}
-                >
-                  {savingReels ? "..." : "Enregistrer"}
+              <div style={{ display: "flex", gap: 4 }}>
+                <button onClick={saveReelsViews} disabled={savingReels}
+                  style={{ flex: 1, padding: "4px", fontSize: 11, fontWeight: 600, cursor: "pointer", background: "#A8C5A0", color: "#1a2e1a", border: "none", borderRadius: "var(--radius-row)", opacity: savingReels ? 0.6 : 1 }}>
+                  {savingReels ? "..." : "OK"}
                 </button>
-                <button
-                  onClick={() => { setEditingReels(false); setEditingMonth(null); }}
-                  style={{
-                    padding: "5px 10px", fontSize: 12, cursor: "pointer",
-                    background: "none", color: "var(--text-muted)",
-                    border: "1px solid var(--border)", borderRadius: "var(--radius-row)",
-                  }}
-                >
-                  Annuler
+                <button onClick={() => { setEditingReels(false); setEditingMonth(null); }}
+                  style={{ padding: "4px 8px", fontSize: 11, cursor: "pointer", background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "var(--radius-row)" }}>
+                  ✕
                 </button>
               </div>
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--text)" }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.5px" }}>
                 {reelsViews > 0 ? reelsViews.toLocaleString("fr-FR") : "—"}
               </div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                {(data?.coveredMonths?.length ?? 0) > 1
-                  ? `${data?.reelsMonthsWithData.length ?? 0}/${data?.coveredMonths.length ?? 0} mois saisis`
-                  : "Saisie manuelle · par mois"}
-              </div>
+              <DeltaBadge delta={dReels} />
             </>
           )}
         </div>
-        <KpiCard
-          title="DM envoyés"
-          value={dmSent > 0 ? dmSent.toLocaleString("fr-FR") : "—"}
-          sub={`sur ${period.label.toLowerCase()}`}
-          accent="lavender"
-          icon={<MessageCircle size={15} />}
-        />
-        <KpiCard
-          title="Conversion globale"
-          value={globalConv !== "—" ? `${globalConv}%` : "—"}
-          sub="Vues → Client"
-          accent="yellow"
-          icon={<TrendingUp size={15} />}
-        />
-        <KpiCard
-          title="Calls → Client"
-          value={callsBooked > 0 ? `${callConv}%` : "—"}
-          sub={`${clients} clients / ${callsBooked} calls`}
-          accent="coral"
-          icon={<PhoneCall size={15} />}
-        />
-        <KpiCard
-          title="Clients signés"
-          value={String(clients)}
-          sub={`sur ${period.label.toLowerCase()}`}
-          accent="sage"
-          icon={<UserCheck size={15} />}
-        />
+
+        <MiniKpi label="DM" value={dmSent} icon={<MessageCircle size={14} />} delta={dDm} />
+        <MiniKpi label="Visites" value={siteVisits ?? 0} icon={<TrendingUp size={14} />} />
+        <MiniKpi label="Calls réservés" value={callsBooked} icon={<PhoneCall size={14} />} delta={dCalls} />
+        <MiniKpi label="Calls réalisés" value={callsDone} icon={<PhoneCall size={14} />} sub={callsBooked > 0 ? `${showRate}% présence` : undefined} />
+        <MiniKpi label="Clients" value={clients} icon={<UserCheck size={14} />} delta={dClients} highlight />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "16px" }}>
-        {/* Funnel + Performance */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <Panel title="Entonnoir de conversion">
-            <div style={{ paddingTop: 12 }}>
-              <FunnelChart steps={funnelSteps} />
-
-              {/* Taux inter-étapes */}
-              <div style={{
-                display: "flex", gap: "10px", marginTop: "20px",
-                padding: "14px", background: "var(--bg-cream)", borderRadius: "var(--radius-row)",
-              }}>
-                {[
-                  { label: "Vues → DM", value: viewsToDm !== null ? `${viewsToDm}%` : "—", color: "#A8C5A0" },
-                  { label: "DM → Site", value: dmToSite !== null ? `${dmToSite}%` : "N/A", color: "#C5B8E8" },
-                  { label: "Site → Call", value: siteToCall !== null ? `${siteToCall}%` : "N/A", color: "#F0C860" },
-                  { label: "Call → Client", value: callsBooked > 0 ? `${callConv}%` : "—", color: "#B8B0E8" },
-                ].map((r, i) => (
-                  <div key={i} style={{
-                    flex: 1, textAlign: "center", padding: "10px",
-                    background: "#FFF", borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                  }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.5px" }}>
-                      {r.value}
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>{r.label}</div>
-                    <div style={{ height: 3, background: r.color, borderRadius: 2, marginTop: 8 }} />
+      {/* Objectifs + Insights EN HAUT */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
+        <Panel title="Objectifs">
+          <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: "12px" }}>
+            {objectives.map((g, i) => {
+              const pct = Math.min(Math.round((g.current / g.goal) * 100), 100);
+              return (
+                <div key={i}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{g.label}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>{g.current} / {g.goal}</span>
                   </div>
-                ))}
-              </div>
-            </div>
-          </Panel>
+                  <div style={{ height: 7, background: "var(--border-color)", borderRadius: 4 }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: g.color, borderRadius: 4, transition: "width 0.5s" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
 
-          <Panel title="Performance par contenu · source Cal.com">
-            <div style={{ paddingTop: 8 }}>
-              {data?.callSources && data.callSources.length > 0 ? (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      {["Contenu / Booking", "Calls", "Clients", "Conv."].map((h) => (
-                        <th key={h} style={{
-                          textAlign: "left", fontSize: 11, fontWeight: 600,
-                          color: "var(--text-muted)", textTransform: "uppercase",
-                          letterSpacing: "0.4px", padding: "0 0 12px",
-                          borderBottom: "1px solid var(--border-color)",
-                        }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.callSources.map((s, i) => (
-                      <tr key={i}>
-                        <td style={{
-                          fontSize: 13, color: "var(--text-primary)", fontWeight: 500,
-                          padding: "12px 0",
-                          borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none",
-                        }}>
-                          {s.source}
-                        </td>
-                        <td style={{
-                          fontSize: 13, fontWeight: 700, padding: "12px 0",
-                          borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none",
-                        }}>
-                          {s.calls}
-                        </td>
-                        <td style={{
-                          fontSize: 13, fontWeight: 700,
-                          color: s.clients > 0 ? "#2E5E28" : "var(--text-muted)",
-                          padding: "12px 0",
-                          borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none",
-                        }}>
-                          {s.clients > 0 ? `+${s.clients}` : "—"}
-                        </td>
-                        <td style={{
-                          fontSize: 13, fontWeight: 600, color: "var(--text-secondary)",
-                          padding: "12px 0",
-                          borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none",
-                        }}>
-                          {s.calls > 0 ? `${Math.round((s.clients / s.calls) * 100)}%` : "—"}
-                        </td>
-                      </tr>
+        <Panel title="Insights">
+          <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: "8px" }}>
+            {callConv > 15 && (
+              <Insight tone="good" text={`Taux call→client de ${callConv}% — au-dessus de la moyenne B2B (10-15%).`} />
+            )}
+            {showRate > 0 && showRate < 70 && (
+              <Insight tone="warn" text={`Seulement ${showRate}% de présence aux calls. Ajoute un rappel automatique 1h avant.`} />
+            )}
+            {viewsToDm !== null && parseFloat(viewsToDm) < 1 && (
+              <Insight tone="neutral" text={`${viewsToDm}% des vues déclenchent un DM. Teste un CTA plus direct dans tes Reels.`} />
+            )}
+            {(data?.noShows ?? 0) > 2 && (
+              <Insight tone="warn" text={`${data?.noShows} no-shows sur la période. Renforce les rappels.`} />
+            )}
+            {clients === 0 && callsBooked > 0 && (
+              <Insight tone="neutral" text="Aucun client signé. Mets à jour le stage des prospects dans le CRM." />
+            )}
+            {dClients !== null && dClients > 0 && (
+              <Insight tone="good" text={`+${dClients}% de clients vs la période précédente. Belle progression.`} />
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      {/* Entonnoir façon Zentra */}
+      <Panel title="Entonnoir de conversion">
+        <FunnelChartV2 steps={funnelSteps} />
+
+        {/* Taux inter-étapes en bandeau */}
+        <div style={{ display: "flex", gap: "8px", marginTop: "20px", padding: "14px", background: "var(--bg-cream)", borderRadius: "var(--radius-row)" }}>
+          {[
+            { label: "Vues → DM", value: viewsToDm !== null ? `${viewsToDm}%` : "—", color: "#A8C5A0" },
+            { label: "Site → Call", value: siteVisits && siteVisits > 0 ? `${Math.round((callsBooked / siteVisits) * 100)}%` : "N/A", color: "#F0C860" },
+            { label: "Présence calls", value: callsBooked > 0 ? `${showRate}%` : "—", color: "#8F9FE0" },
+            { label: "Call → Client", value: callsBooked > 0 ? `${callConv}%` : "—", color: "#E8A090" },
+          ].map((r, i) => (
+            <div key={i} style={{ flex: 1, textAlign: "center", padding: "10px", background: "#FFF", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.5px" }}>{r.value}</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 4 }}>{r.label}</div>
+              <div style={{ height: 3, background: r.color, borderRadius: 2, marginTop: 8 }} />
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      {/* Business : valeur + vélocité */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginTop: "16px" }}>
+        <KpiCard title="CA généré" value={business && business.totalRevenue > 0 ? `${business.totalRevenue.toLocaleString("fr-FR")} €` : "—"} sub={`sur ${period.label.toLowerCase()}`} accent="sage" icon={<Euro size={15} />} />
+        <KpiCard title="Panier moyen" value={business && business.avgDealSize > 0 ? `${business.avgDealSize.toLocaleString("fr-FR")} €` : "—"} sub="par client signé" accent="yellow" icon={<Target size={15} />} />
+        <KpiCard title="Vélocité" value={business?.avgVelocityDays != null ? `${business.avgVelocityDays} j` : "—"} sub="call → signature" accent="lavender" icon={<Clock size={15} />} />
+        <KpiCard title="Conv. globale" value={globalConv !== "—" ? `${globalConv}%` : "—"} sub="vues → client" accent="coral" icon={<TrendingUp size={15} />} />
+      </div>
+
+      {/* Performance par contenu */}
+      <div style={{ marginTop: "16px" }}>
+        <Panel title="Performance par contenu · source Cal.com">
+          <div style={{ paddingTop: 8 }}>
+            {data?.callSources && data.callSources.length > 0 ? (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["Contenu / Booking", "Calls", "Clients", "Conv."].map((h) => (
+                      <th key={h} style={{ textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", padding: "0 0 12px", borderBottom: "1px solid var(--border-color)" }}>{h}</th>
                     ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div style={{ fontSize: 13, color: "var(--text-muted)", paddingTop: 8 }}>
-                  Aucun call enregistré pour l'instant.
-                </div>
-              )}
-            </div>
-          </Panel>
-        </div>
-
-        {/* Right rail */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Webhook setup */}
-          <Panel title="Config ManyChat webhook">
-            <div style={{ paddingTop: 8 }}>
-              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 10 }}>
-                Dans ton flow ManyChat, ajoute une action <strong>External Request</strong> avec cette URL :
-              </p>
-              <div style={{
-                padding: "10px 12px", background: "#1C1C1E",
-                borderRadius: 8, fontFamily: "monospace", fontSize: 11,
-                color: "#A8C5A0", wordBreak: "break-all",
-              }}>
-                POST {typeof window !== "undefined" ? window.location.origin : ""}/api/manychat/webhook
-              </div>
-              <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, lineHeight: 1.5 }}>
-                Méthode : <strong>POST</strong> · Body optionnel : <code style={{ background: "#F0EDE8", padding: "1px 4px", borderRadius: 3 }}>{"{ \"flow_name\": \"{{flow_name}}\" }"}</code>
-              </p>
-              <div style={{
-                marginTop: 10, padding: "8px 12px",
-                background: dmSent > 0 ? "#F0F7EF" : "var(--yellow-light)",
-                borderRadius: "var(--radius-sm)", fontSize: 12,
-                color: dmSent > 0 ? "#2E5E28" : "#7A5E10",
-                fontWeight: 600,
-              }}>
-                {dmSent > 0 ? `✓ ${dmSent} DM loggé${dmSent > 1 ? "s" : ""}` : "En attente du premier ping…"}
-              </div>
-            </div>
-          </Panel>
-
-          {/* Qualité calls */}
-          <Panel title="Qualité des calls">
-            <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: "10px" }}>
-              {[
-                { label: "Calls effectués", value: data?.totalCallsDone ?? 0 },
-                { label: "No-shows / annulés", value: data?.noShows ?? 0 },
-                {
-                  label: "Taux présence",
-                  value: (data?.totalCallsDone ?? 0) + (data?.noShows ?? 0) > 0
-                    ? `${Math.round(((data?.totalCallsDone ?? 0) / ((data?.totalCallsDone ?? 0) + (data?.noShows ?? 0))) * 100)}%`
-                    : "—",
-                },
-              ].map((stat, i) => (
-                <div key={i} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "10px 12px", background: "var(--bg-cream)",
-                  borderRadius: "var(--radius-sm)",
-                }}>
-                  <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{stat.label}</span>
-                  <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text-primary)" }}>{stat.value}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          {/* Objectifs */}
-          <Panel title="Objectifs">
-            <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: "14px" }}>
-              {objectives.map((g, i) => {
-                const pct = Math.min(Math.round((g.current / g.goal) * 100), 100);
-                return (
-                  <div key={i}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{g.label}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>{g.current} / {g.goal}</span>
-                    </div>
-                    <div style={{ height: 7, background: "var(--border-color)", borderRadius: 4 }}>
-                      <div style={{ width: `${pct}%`, height: "100%", background: g.color, borderRadius: 4 }} />
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{pct}% de l'objectif</div>
-                  </div>
-                );
-              })}
-            </div>
-          </Panel>
-
-          {/* Insights dynamiques */}
-          <Panel title="Insights">
-            <div style={{ paddingTop: 8, display: "flex", flexDirection: "column", gap: "10px" }}>
-              {callConv > 15 && (
-                <div style={{
-                  padding: "10px 12px", background: "#F0F7EF",
-                  borderRadius: "var(--radius-sm)", fontSize: 12,
-                  color: "var(--text-secondary)", lineHeight: 1.5,
-                }}>
-                  Taux call→client de {callConv}% — au-dessus de la moyenne B2B (10-15%).
-                </div>
-              )}
-              {viewsToDm !== null && parseFloat(viewsToDm) < 1 && (
-                <div style={{
-                  padding: "10px 12px", background: "var(--bg-cream)",
-                  borderRadius: "var(--radius-sm)", fontSize: 12,
-                  color: "var(--text-secondary)", lineHeight: 1.5,
-                }}>
-                  Seulement {viewsToDm}% des vues déclenchent un DM. Teste un CTA plus direct dans tes Reels.
-                </div>
-              )}
-              {(data?.noShows ?? 0) > 2 && (
-                <div style={{
-                  padding: "10px 12px", background: "var(--yellow-light)",
-                  borderRadius: "var(--radius-sm)", fontSize: 12,
-                  color: "#7A5E10", lineHeight: 1.5,
-                }}>
-                  {data?.noShows} no-shows. Envoie un rappel automatique 1h avant le call.
-                </div>
-              )}
-              {clients === 0 && callsBooked > 0 && (
-                <div style={{
-                  padding: "10px 12px", background: "var(--bg-cream)",
-                  borderRadius: "var(--radius-sm)", fontSize: 12,
-                  color: "var(--text-secondary)", lineHeight: 1.5,
-                }}>
-                  Aucun client dans le CRM. Met à jour le stage des prospects dans la page CRM.
-                </div>
-              )}
-            </div>
-          </Panel>
-        </div>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.callSources.map((s, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: 13, color: "var(--text-primary)", fontWeight: 500, padding: "12px 0", borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none" }}>{s.source}</td>
+                      <td style={{ fontSize: 13, fontWeight: 700, padding: "12px 0", borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none" }}>{s.calls}</td>
+                      <td style={{ fontSize: 13, fontWeight: 700, color: s.clients > 0 ? "#2E5E28" : "var(--text-muted)", padding: "12px 0", borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none" }}>{s.clients > 0 ? `+${s.clients}` : "—"}</td>
+                      <td style={{ fontSize: 13, fontWeight: 600, color: "var(--text-secondary)", padding: "12px 0", borderBottom: i < data.callSources.length - 1 ? "1px solid var(--border-color)" : "none" }}>{s.calls > 0 ? `${Math.round((s.clients / s.calls) * 100)}%` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div style={{ fontSize: 13, color: "var(--text-muted)", paddingTop: 8 }}>Aucun call enregistré pour l&apos;instant.</div>
+            )}
+          </div>
+        </Panel>
       </div>
+    </div>
+  );
+}
+
+// Mini-carte KPI compacte avec delta
+function MiniKpi({ label, value, icon, delta, sub, highlight }: {
+  label: string; value: number; icon: React.ReactNode; delta?: number | null; sub?: string; highlight?: boolean;
+}) {
+  return (
+    <div style={{ position: "relative", background: highlight ? "var(--sage-light)" : "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius-card)", padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)", fontWeight: 500, marginBottom: 8 }}>
+        {icon} {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.5px" }}>
+        {value > 0 ? value.toLocaleString("fr-FR") : "—"}
+      </div>
+      {sub ? (
+        <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>
+      ) : (
+        <DeltaBadge delta={delta} />
+      )}
+    </div>
+  );
+}
+
+// Badge de variation ▲/▼
+function DeltaBadge({ delta }: { delta?: number | null }) {
+  if (delta === null || delta === undefined) {
+    return <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>—</div>;
+  }
+  const positive = delta >= 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: positive ? "#2E5E28" : "#7A3028", marginTop: 3 }}>
+      {positive ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+      {positive ? "+" : ""}{delta}% <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>vs préc.</span>
+    </div>
+  );
+}
+
+// Bloc insight coloré
+function Insight({ tone, text }: { tone: "good" | "warn" | "neutral"; text: string }) {
+  const styles = {
+    good: { bg: "#F0F7EF", color: "var(--text-secondary)" },
+    warn: { bg: "var(--yellow-light)", color: "#7A5E10" },
+    neutral: { bg: "var(--bg-cream)", color: "var(--text-secondary)" },
+  }[tone];
+  return (
+    <div style={{ display: "flex", gap: 8, padding: "10px 12px", background: styles.bg, borderRadius: "var(--radius-sm)", fontSize: 12, color: styles.color, lineHeight: 1.5 }}>
+      <Lightbulb size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+      <span>{text}</span>
     </div>
   );
 }
