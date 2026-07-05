@@ -12,11 +12,11 @@ export default function DashboardLayout({
         display: "flex",
         height: "100vh",
         overflow: "hidden",
-        background: "var(--bg-cream)",
       }}
     >
       <Sidebar />
       <main
+        className="app-gradient-bg"
         style={{
           flex: 1,
           overflowY: "auto",

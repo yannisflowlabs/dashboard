@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900,701,501,401&f[]=general-sans@400,500,600,700&display=swap');
 @import "tailwindcss";
 
 :root {
@@ -25,15 +25,39 @@
   --text-on-dark-muted: rgba(255,255,255,0.45);
   --text-on-dark-secondary: rgba(255,255,255,0.65);
 
-  --radius-panel: 24px;
-  --radius-card: 20px;
-  --radius-row: 14px;
-  --radius-nav: 12px;
-  --radius-badge: 8px;
-  --radius-sm: 6px;
+  --radius-panel: 28px;
+  --radius-card: 24px;
+  --radius-row: 16px;
+  --radius-nav: 14px;
+  --radius-badge: 10px;
+  --radius-sm: 8px;
 
   --sidebar-width: 236px;
   --right-rail-width: 340px;
+
+  /* --- Design system v2 : dégradés, verre, ombres --- */
+  /* Grand dégradé de fond de l'app (vert d'eau → lavande → pêche) */
+  --app-gradient:
+    radial-gradient(120% 120% at 0% 0%, rgba(168,197,160,0.55) 0%, transparent 45%),
+    radial-gradient(120% 120% at 100% 0%, rgba(184,176,232,0.50) 0%, transparent 50%),
+    radial-gradient(140% 140% at 100% 100%, rgba(232,160,144,0.40) 0%, transparent 55%),
+    radial-gradient(120% 120% at 0% 100%, rgba(240,200,96,0.35) 0%, transparent 50%),
+    linear-gradient(135deg, #EAF3E8 0%, #EDEAF7 50%, #F7EDE9 100%);
+
+  /* Cartes en verre dépoli — blanches et lumineuses comme les réfs */
+  --glass-bg: rgba(255,255,255,0.78);
+  --glass-bg-strong: rgba(255,255,255,0.9);
+  --glass-border: rgba(255,255,255,0.9);
+  --glass-blur: 24px;
+
+  /* Ombres larges et très diffuses */
+  --shadow-glass: 0 10px 40px rgba(70,70,110,0.08);
+  --shadow-glass-lg: 0 20px 60px rgba(70,70,110,0.12);
+  --shadow-soft: 0 4px 20px rgba(70,70,110,0.05);
+
+  /* Alias : les cartes inline qui utilisaient --card / --border deviennent du verre */
+  --card: var(--glass-bg-strong);
+  --border: var(--glass-border);
 }
 
 *, *::before, *::after {
@@ -44,15 +68,48 @@
 
 html, body {
   height: 100%;
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: var(--bg-cream);
+  font-family: 'Satoshi', 'General Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: #EDEAF7;
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+}
+
+/* Chiffres hero : Satoshi Black, large et net comme les dashboards de réf */
+.hero-number {
+  font-family: 'Satoshi', sans-serif;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  font-feature-settings: "tnum" 1;
 }
 
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #D8D0C4; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #C0B8AC; }
+::-webkit-scrollbar-thumb { background: rgba(120,120,150,0.28); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(120,120,150,0.45); }
+
+/* --- Utilitaires verre dépoli --- */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass);
+}
+.glass-strong {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-glass);
+}
+
+/* Fond dégradé global de l'app */
+.app-gradient-bg {
+  background: var(--app-gradient);
+  background-attachment: fixed;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }

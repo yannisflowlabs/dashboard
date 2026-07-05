@@ -29,15 +29,26 @@ export default function Sidebar() {
 
   return (
     <aside
+      className="app-gradient-bg"
       style={{
-        width: "var(--sidebar-width)",
-        minWidth: "var(--sidebar-width)",
+        width: "calc(var(--sidebar-width) + 16px)",
+        minWidth: "calc(var(--sidebar-width) + 16px)",
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        padding: "12px",
+      }}
+    >
+    <div
+      style={{
         background: "var(--sidebar-bg)",
+        borderRadius: 24,
         display: "flex",
         flexDirection: "column",
         height: "100%",
         padding: "20px 12px",
         gap: "4px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
       }}
     >
       {/* Logo */}
@@ -195,6 +206,7 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
+    </div>
     </aside>
   );
 }

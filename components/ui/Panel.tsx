@@ -11,10 +11,9 @@ interface PanelProps {
 export default function Panel({ title, action, children, style, padding = "24px" }: PanelProps) {
   return (
     <div
+      className="glass-strong"
       style={{
-        background: "var(--card-bg)",
-        borderRadius: "var(--radius-card)",
-        border: "1px solid var(--border-color)",
+        borderRadius: "var(--radius-panel)",
         overflow: "hidden",
         ...style,
       }}

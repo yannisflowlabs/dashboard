@@ -34,6 +34,10 @@ export default function KpiCard({
     <div
       style={{
         background: colors.bg,
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        border: "1px solid var(--glass-border)",
+        boxShadow: "var(--shadow-soft)",
         borderRadius: "var(--radius-card)",
         padding: "22px 24px",
         display: "flex",
@@ -75,11 +79,10 @@ export default function KpiCard({
         )}
       </div>
       <div
+        className="hero-number"
         style={{
-          fontSize: 28,
-          fontWeight: 800,
+          fontSize: 32,
           color: colors.text,
-          letterSpacing: "-0.5px",
           lineHeight: 1,
         }}
       >
