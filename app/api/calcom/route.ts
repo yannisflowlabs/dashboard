@@ -82,15 +82,26 @@ export async function GET() {
       const attendees = (b.attendees as { name: string; email: string }[]) ?? [];
       const attendee = attendees[0];
       if (!attendee?.email) continue;
+      const bookingDate = new Date(b.start as string);
+      const existing = await getPrisma().prospect.findUnique({
+        where: { email: attendee.email },
+        select: { stageUpdatedAt: true },
+      });
       await getPrisma().prospect.upsert({
         where: { email: attendee.email },
-        update: { name: attendee.name, calBookingUid: b.uid as string },
+        update: {
+          name: attendee.name,
+          calBookingUid: b.uid as string,
+          // Ne pas écraser une date déjà renseignée manuellement
+          ...(existing?.stageUpdatedAt == null ? { stageUpdatedAt: bookingDate } : {}),
+        },
         create: {
           name: attendee.name,
           email: attendee.email,
           source: "calcom",
           stage: "call_booked",
           calBookingUid: b.uid as string,
+          stageUpdatedAt: bookingDate,
         },
       });
     }
