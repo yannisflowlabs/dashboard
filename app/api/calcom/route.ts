@@ -134,11 +134,24 @@ export async function GET() {
       return d >= startOfMonth;
     });
 
+    // Données brutes pour le graphique de tendances (toutes les semaines)
+    const trendRaw: { start: string; status: string; reviewStatus?: string }[] = [
+      ...upcoming.map((b) => ({ start: b.start as string, status: "upcoming" })),
+      ...past.map((b) => {
+        const id = b.id as number;
+        const rev = reviewMap.get(id);
+        return { start: b.start as string, status: "past", reviewStatus: rev };
+      }),
+      ...cancelled.map((b) => ({ start: b.start as string, status: "cancelled" })),
+      ...rejected.map((b) => ({ start: b.start as string, status: "rejected" })),
+    ];
+
     return NextResponse.json({
       upcoming: upcoming.map((b) => formatBooking(b, "accepted")),
       allPast,
       pendingReview,
       reviewMap: Object.fromEntries(reviewMap),
+      trendRaw,
       stats: {
         thisWeek: thisWeek.length,
         thisMonth: thisMonth.length,

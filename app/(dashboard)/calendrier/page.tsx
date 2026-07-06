@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Calendar, Clock, Video, ExternalLink, Loader2, CheckCircle, XCircle, X as XIcon } from "lucide-react";
 import Panel from "@/components/ui/Panel";
 import PageHeader from "@/components/ui/PageHeader";
@@ -32,17 +32,334 @@ interface ReviewStats {
   showRate: number | null;
 }
 
+interface TrendRawItem {
+  start: string;
+  status: "upcoming" | "past" | "cancelled" | "rejected";
+  reviewStatus?: string;
+}
+
 interface CalData {
   upcoming: Booking[];
   allPast: Booking[];
   pendingReview: Booking[];
   reviewMap: Record<number, ReviewStatus>;
+  trendRaw: TrendRawItem[];
   stats: { thisWeek: number; thisMonth: number; total: number };
 }
 
-interface ReviewData {
-  stats: ReviewStats;
+// ---- Graphique de tendances ----
+
+type TrendCategory = "planned" | "completed" | "rescheduled" | "cancelled" | "noshowHost" | "noshowGuest";
+
+interface WeekBucket {
+  label: string; // "May 25 - 31"
+  weekStart: Date;
+  planned: number;
+  completed: number;
+  rescheduled: number;
+  cancelled: number;
+  noshowHost: number;
+  noshowGuest: number;
 }
+
+const TREND_SERIES: { key: TrendCategory; label: string; color: string }[] = [
+  { key: "planned",     label: "Planifié",         color: "#A78BFA" },
+  { key: "completed",   label: "Completed",         color: "#4ADE80" },
+  { key: "rescheduled", label: "Rescheduled",       color: "#60A5FA" },
+  { key: "cancelled",   label: "Cancelled",         color: "#F87171" },
+  { key: "noshowHost",  label: "No-Show (Host)",    color: "#94A3B8" },
+  { key: "noshowGuest", label: "No-Show (Guest)",   color: "#FB923C" },
+];
+
+function getMondayOf(d: Date): Date {
+  const day = d.getDay(); // 0=Sun
+  const diff = day === 0 ? -6 : 1 - day;
+  const m = new Date(d);
+  m.setHours(0, 0, 0, 0);
+  m.setDate(d.getDate() + diff);
+  return m;
+}
+
+function formatWeekLabel(start: Date): string {
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const startFmt = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const endFmt = end.toLocaleDateString("en-US", { day: "numeric" });
+  return `${startFmt} - ${endFmt}`;
+}
+
+function buildWeekBuckets(items: TrendRawItem[], from: Date, to: Date): WeekBucket[] {
+  const buckets = new Map<string, WeekBucket>();
+
+  // Pre-fill all weeks in range
+  const cursor = getMondayOf(from);
+  while (cursor <= to) {
+    const key = cursor.toISOString().slice(0, 10);
+    buckets.set(key, {
+      label: formatWeekLabel(new Date(cursor)),
+      weekStart: new Date(cursor),
+      planned: 0, completed: 0, rescheduled: 0,
+      cancelled: 0, noshowHost: 0, noshowGuest: 0,
+    });
+    cursor.setDate(cursor.getDate() + 7);
+  }
+
+  for (const item of items) {
+    const d = new Date(item.start);
+    if (d < from || d > to) continue;
+    const monday = getMondayOf(d);
+    const key = monday.toISOString().slice(0, 10);
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+
+    if (item.status === "upcoming") {
+      bucket.planned++;
+    } else if (item.status === "past") {
+      if (item.reviewStatus === "noshow") bucket.noshowGuest++;
+      else bucket.completed++;
+    } else if (item.status === "cancelled") {
+      bucket.cancelled++;
+    } else if (item.status === "rejected") {
+      bucket.noshowHost++;
+    }
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
+}
+
+type RangePreset = "3m" | "6m" | "1y" | "all";
+
+function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
+  const [rangePreset, setRangePreset] = useState<RangePreset>("6m");
+  const [visible, setVisible] = useState<Set<TrendCategory>>(
+    new Set(["planned", "completed", "cancelled", "noshowGuest"])
+  );
+  const [hovered, setHovered] = useState<{ x: number; y: number; bucket: WeekBucket } | null>(null);
+
+  const { from, to } = useMemo(() => {
+    const now = new Date();
+    const to = new Date(now);
+    to.setDate(to.getDate() + 14); // include upcoming 2 weeks
+    let from: Date;
+    if (rangePreset === "3m") { from = new Date(now); from.setMonth(from.getMonth() - 3); }
+    else if (rangePreset === "6m") { from = new Date(now); from.setMonth(from.getMonth() - 6); }
+    else if (rangePreset === "1y") { from = new Date(now); from.setFullYear(from.getFullYear() - 1); }
+    else { from = new Date("2024-01-01"); }
+    return { from, to };
+  }, [rangePreset]);
+
+  const buckets = useMemo(() => buildWeekBuckets(trendRaw, from, to), [trendRaw, from, to]);
+
+  const maxVal = useMemo(() => {
+    let m = 0;
+    for (const b of buckets) {
+      for (const s of TREND_SERIES) {
+        if (visible.has(s.key)) m = Math.max(m, b[s.key]);
+      }
+    }
+    return Math.max(m, 1);
+  }, [buckets, visible]);
+
+  const toggleSeries = (key: TrendCategory) => {
+    setVisible((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) { if (next.size > 1) next.delete(key); }
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // SVG dimensions
+  const W = 900, H = 220;
+  const padL = 36, padR = 16, padT = 16, padB = 40;
+  const chartW = W - padL - padR;
+  const chartH = H - padT - padB;
+  const n = buckets.length;
+  const xStep = n > 1 ? chartW / (n - 1) : chartW;
+
+  const xOf = (i: number) => padL + i * xStep;
+  const yOf = (v: number) => padT + chartH - (v / maxVal) * chartH;
+
+  // Y gridlines
+  const yTicks = [0, Math.round(maxVal / 3), Math.round((maxVal * 2) / 3), maxVal];
+
+  const presets: { key: RangePreset; label: string }[] = [
+    { key: "3m", label: "3 mois" },
+    { key: "6m", label: "6 mois" },
+    { key: "1y", label: "1 an" },
+    { key: "all", label: "Tout" },
+  ];
+
+  return (
+    <Panel title="Tendances de l'événement">
+      {/* Legend + Range */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+          {TREND_SERIES.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => toggleSeries(s.key)}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: "none", border: "none", cursor: "pointer", padding: "3px 0",
+                opacity: visible.has(s.key) ? 1 : 0.35,
+                fontFamily: "inherit", fontSize: 12, color: "var(--text-secondary)",
+                transition: "opacity 0.15s",
+              }}
+            >
+              <span style={{
+                width: 10, height: 10, borderRadius: "50%",
+                background: s.color, display: "inline-block", flexShrink: 0,
+              }} />
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {presets.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setRangePreset(p.key)}
+              style={{
+                padding: "5px 12px", fontSize: 12, fontWeight: 600,
+                borderRadius: 20, border: "1px solid var(--border-color)",
+                background: rangePreset === p.key ? "var(--text-primary)" : "transparent",
+                color: rangePreset === p.key ? "#FFF" : "var(--text-secondary)",
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* SVG Chart */}
+      <div style={{ position: "relative", overflowX: "auto" }}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          style={{ width: "100%", height: "auto", minWidth: Math.max(n * 28, 400) }}
+          onMouseLeave={() => setHovered(null)}
+        >
+          {/* Grid */}
+          {yTicks.map((v) => (
+            <g key={v}>
+              <line
+                x1={padL} y1={yOf(v)} x2={W - padR} y2={yOf(v)}
+                stroke="rgba(120,120,150,0.15)" strokeDasharray="4 4"
+              />
+              <text x={padL - 6} y={yOf(v) + 4} fontSize={10} fill="var(--text-muted)" textAnchor="end">
+                {v}
+              </text>
+            </g>
+          ))}
+
+          {/* X axis labels — show every Nth to avoid overlap */}
+          {buckets.map((b, i) => {
+            const step = n > 20 ? Math.ceil(n / 12) : n > 10 ? 2 : 1;
+            if (i % step !== 0) return null;
+            return (
+              <text
+                key={i}
+                x={xOf(i)}
+                y={H - 6}
+                fontSize={9}
+                fill="var(--text-muted)"
+                textAnchor="middle"
+              >
+                {b.label}
+              </text>
+            );
+          })}
+
+          {/* Lines */}
+          {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
+            const points = buckets.map((b, i) => `${xOf(i)},${yOf(b[s.key])}`).join(" ");
+            return (
+              <g key={s.key}>
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                {buckets.map((b, i) => b[s.key] > 0 ? (
+                  <circle
+                    key={i}
+                    cx={xOf(i)} cy={yOf(b[s.key])} r={4}
+                    fill={s.color} stroke="#FFF" strokeWidth={1.5}
+                  />
+                ) : null)}
+              </g>
+            );
+          })}
+
+          {/* Hover zones */}
+          {buckets.map((b, i) => (
+            <rect
+              key={i}
+              x={xOf(i) - xStep / 2}
+              y={padT}
+              width={xStep}
+              height={chartH}
+              fill="transparent"
+              onMouseEnter={(e) => {
+                const rect = (e.currentTarget.closest("svg") as SVGSVGElement).getBoundingClientRect();
+                setHovered({
+                  x: xOf(i) / W * rect.width + rect.left,
+                  y: rect.top,
+                  bucket: b,
+                });
+              }}
+            />
+          ))}
+        </svg>
+
+        {/* Tooltip */}
+        {hovered && (
+          <div
+            style={{
+              position: "fixed",
+              left: hovered.x + 12,
+              top: hovered.y + 20,
+              background: "#1C1C1E",
+              color: "#FFF",
+              borderRadius: 10,
+              padding: "10px 14px",
+              fontSize: 12,
+              zIndex: 100,
+              pointerEvents: "none",
+              minWidth: 160,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.7 }}>{hovered.bucket.label}</div>
+            {TREND_SERIES.map((s) => {
+              const v = hovered.bucket[s.key];
+              if (v === 0) return null;
+              return (
+                <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{s.label}</span>
+                  <span style={{ fontWeight: 700 }}>{v}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* X axis label */}
+      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+        Heure de début de réservation
+      </div>
+    </Panel>
+  );
+}
+
+// ---- Composants existants ----
 
 const statusConfig: Record<ReviewStatus, { label: string; icon: React.ReactNode; color: string; bg: string }> = {
   showed: { label: "Présent", icon: <CheckCircle size={12} />, color: "#2E5E28", bg: "rgba(168,197,160,0.15)" },
@@ -176,7 +493,6 @@ export default function CalendrierPage() {
 
   const handleReviewUpdate = (bookingId: number, status: ReviewStatus) => {
     setReviewMap((prev) => ({ ...prev, [bookingId]: status }));
-    // Refresh stats
     fetch("/api/call-reviews").then(r => r.json()).then(d => setReviewStats(d.stats));
   };
 
@@ -245,6 +561,13 @@ export default function CalendrierPage() {
             />
           </div>
 
+          {/* Graphique de tendances */}
+          {calData?.trendRaw && calData.trendRaw.length > 0 && (
+            <div style={{ marginBottom: "20px" }}>
+              <TrendChart trendRaw={calData.trendRaw} />
+            </div>
+          )}
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: "16px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
@@ -311,7 +634,7 @@ export default function CalendrierPage() {
                             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: 2 }}>
                               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{b.dateLabel} · {b.timeLabel}</span>
                               {b.cancellationReason && (
-                                <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>"{b.cancellationReason}"</span>
+                                <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>&quot;{b.cancellationReason}&quot;</span>
                               )}
                             </div>
                           </div>
