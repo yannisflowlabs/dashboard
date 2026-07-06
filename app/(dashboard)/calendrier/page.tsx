@@ -61,7 +61,7 @@ interface WeekBucket {
 
 const TREND_SERIES: { key: TrendCategory; label: string; color: string }[] = [
   { key: "present",   label: "Présent",  color: "#4ADE80" },
-  { key: "noshow",    label: "No-show",  color: "#FB923C" },
+  { key: "noshow",    label: "No-show",  color: "#60A5FA" },
   { key: "cancelled", label: "Annulé",   color: "#F87171" },
 ];
 
