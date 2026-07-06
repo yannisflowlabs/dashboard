@@ -49,26 +49,20 @@ interface CalData {
 
 // ---- Graphique de tendances ----
 
-type TrendCategory = "planned" | "completed" | "rescheduled" | "cancelled" | "noshowHost" | "noshowGuest";
+type TrendCategory = "present" | "noshow" | "cancelled";
 
 interface WeekBucket {
-  label: string; // "May 25 - 31"
+  label: string;
   weekStart: Date;
-  planned: number;
-  completed: number;
-  rescheduled: number;
+  present: number;
+  noshow: number;
   cancelled: number;
-  noshowHost: number;
-  noshowGuest: number;
 }
 
 const TREND_SERIES: { key: TrendCategory; label: string; color: string }[] = [
-  { key: "planned",     label: "Planifié",         color: "#A78BFA" },
-  { key: "completed",   label: "Completed",         color: "#4ADE80" },
-  { key: "rescheduled", label: "Rescheduled",       color: "#60A5FA" },
-  { key: "cancelled",   label: "Cancelled",         color: "#F87171" },
-  { key: "noshowHost",  label: "No-Show (Host)",    color: "#94A3B8" },
-  { key: "noshowGuest", label: "No-Show (Guest)",   color: "#FB923C" },
+  { key: "present",   label: "Présent",  color: "#4ADE80" },
+  { key: "noshow",    label: "No-show",  color: "#FB923C" },
+  { key: "cancelled", label: "Annulé",   color: "#F87171" },
 ];
 
 function getMondayOf(d: Date): Date {
@@ -91,15 +85,13 @@ function formatWeekLabel(start: Date): string {
 function buildWeekBuckets(items: TrendRawItem[], from: Date, to: Date): WeekBucket[] {
   const buckets = new Map<string, WeekBucket>();
 
-  // Pre-fill all weeks in range
   const cursor = getMondayOf(from);
   while (cursor <= to) {
     const key = cursor.toISOString().slice(0, 10);
     buckets.set(key, {
       label: formatWeekLabel(new Date(cursor)),
       weekStart: new Date(cursor),
-      planned: 0, completed: 0, rescheduled: 0,
-      cancelled: 0, noshowHost: 0, noshowGuest: 0,
+      present: 0, noshow: 0, cancelled: 0,
     });
     cursor.setDate(cursor.getDate() + 7);
   }
@@ -112,39 +104,40 @@ function buildWeekBuckets(items: TrendRawItem[], from: Date, to: Date): WeekBuck
     const bucket = buckets.get(key);
     if (!bucket) continue;
 
-    if (item.status === "upcoming") {
-      bucket.planned++;
-    } else if (item.status === "past") {
-      if (item.reviewStatus === "noshow") bucket.noshowGuest++;
-      else bucket.completed++;
-    } else if (item.status === "cancelled") {
+    if (item.status === "past") {
+      if (item.reviewStatus === "noshow") bucket.noshow++;
+      else if (item.reviewStatus === "cancelled") bucket.cancelled++;
+      else bucket.present++;
+    } else if (item.status === "cancelled" || item.status === "rejected") {
       bucket.cancelled++;
-    } else if (item.status === "rejected") {
-      bucket.noshowHost++;
     }
   }
 
   return Array.from(buckets.values()).sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
 }
 
-type RangePreset = "3m" | "6m" | "1y" | "all";
+type RangePreset = "month" | "30d" | "3m" | "1y";
 
 function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
-  const [rangePreset, setRangePreset] = useState<RangePreset>("6m");
+  const [rangePreset, setRangePreset] = useState<RangePreset>("3m");
   const [visible, setVisible] = useState<Set<TrendCategory>>(
-    new Set(["planned", "completed", "cancelled", "noshowGuest"])
+    new Set(["present", "noshow", "cancelled"])
   );
   const [hovered, setHovered] = useState<{ x: number; y: number; bucket: WeekBucket } | null>(null);
 
   const { from, to } = useMemo(() => {
     const now = new Date();
     const to = new Date(now);
-    to.setDate(to.getDate() + 14); // include upcoming 2 weeks
     let from: Date;
-    if (rangePreset === "3m") { from = new Date(now); from.setMonth(from.getMonth() - 3); }
-    else if (rangePreset === "6m") { from = new Date(now); from.setMonth(from.getMonth() - 6); }
-    else if (rangePreset === "1y") { from = new Date(now); from.setFullYear(from.getFullYear() - 1); }
-    else { from = new Date("2024-01-01"); }
+    if (rangePreset === "month") {
+      from = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (rangePreset === "30d") {
+      from = new Date(now); from.setDate(from.getDate() - 30);
+    } else if (rangePreset === "3m") {
+      from = new Date(now); from.setMonth(from.getMonth() - 3);
+    } else {
+      from = new Date(now); from.setFullYear(from.getFullYear() - 1);
+    }
     return { from, to };
   }, [rangePreset]);
 
@@ -184,10 +177,10 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
   const yTicks = [0, Math.round(maxVal / 3), Math.round((maxVal * 2) / 3), maxVal];
 
   const presets: { key: RangePreset; label: string }[] = [
-    { key: "3m", label: "3 mois" },
-    { key: "6m", label: "6 mois" },
-    { key: "1y", label: "1 an" },
-    { key: "all", label: "Tout" },
+    { key: "month", label: "Ce mois" },
+    { key: "30d",   label: "30 jours" },
+    { key: "3m",    label: "3 mois" },
+    { key: "1y",    label: "1 an" },
   ];
 
   return (
