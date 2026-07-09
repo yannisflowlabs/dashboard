@@ -75,6 +75,11 @@ interface ClientRow {
   email: string;
 }
 
+interface ReviewRow {
+  bookingId: number;
+  status: string;
+}
+
 // Calcule les chiffres de l'entonnoir pour une plage donnée
 async function computeFunnel(
   rangeStart: Date,
@@ -85,6 +90,7 @@ async function computeFunnel(
     cancelled: Record<string, unknown>[];
     rejected: Record<string, unknown>[];
     clients: ClientRow[];
+    reviews: ReviewRow[];
     umamiToken: string | null;
   }
 ) {
@@ -106,8 +112,12 @@ async function computeFunnel(
   const cancelledR = data.cancelled.filter((b) => inRange(b.start as string));
   const rejectedR = data.rejected.filter((b) => inRange(b.start as string));
 
+  // Seuls les calls marqués "showed" dans CallReview comptent comme réalisés
+  const showedIds = new Set(
+    data.reviews.filter((r) => r.status === "showed").map((r) => r.bookingId)
+  );
   const callsBooked = upcomingR.length + pastR.length;
-  const callsDone = pastR.length; // calls passés = réalisés (présents)
+  const callsDone = pastR.filter((b) => showedIds.has(b.id as number)).length;
   const noShows = cancelledR.length + rejectedR.length;
 
   const clientsInRange = data.clients.filter((c) => inRange(c.clientSince ?? c.createdAt));
@@ -148,7 +158,7 @@ export async function GET(req: Request) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     // Données brutes partagées (une seule fois pour les deux périodes)
-    const [upcoming, past, cancelled, rejected, clientsRaw, allProspects, snapshots, umamiToken] =
+    const [upcoming, past, cancelled, rejected, clientsRaw, allProspects, snapshots, umamiToken, reviewsRaw] =
       await Promise.all([
         fetchCalBookings("upcoming", 100),
         fetchCalBookings("past", 100),
@@ -166,10 +176,12 @@ export async function GET(req: Request) {
           select: { followers: true, createdAt: true },
         }),
         getUmamiToken(),
+        getPrisma().callReview.findMany({ select: { bookingId: true, status: true } }),
       ]);
 
     const clients = clientsRaw as ClientRow[];
-    const shared = { upcoming, past, cancelled, rejected, clients, umamiToken };
+    const reviews = reviewsRaw as ReviewRow[];
+    const shared = { upcoming, past, cancelled, rejected, clients, reviews, umamiToken };
 
     // Calcul des deux périodes
     const [cur, prev] = await Promise.all([
