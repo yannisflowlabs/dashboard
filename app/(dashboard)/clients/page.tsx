@@ -568,10 +568,12 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
   const [driveLoading, setDriveLoading] = useState(false);
   const [driveSearched, setDriveSearched] = useState(false);
   const [importingDoc, setImportingDoc] = useState<string | null>(null);
+  const [driveQuery, setDriveQuery] = useState(client.name);
 
   async function searchDrive() {
+    if (!driveQuery.trim()) return;
     setDriveLoading(true); setDriveSearched(true);
-    const res = await fetch(`/api/google/drive?q=${encodeURIComponent(client.name.split(" ")[0])}`);
+    const res = await fetch(`/api/google/drive?q=${encodeURIComponent(driveQuery.trim())}`);
     const data = await res.json();
     setDriveFiles(data.files ?? []); setDriveLoading(false);
   }
@@ -599,10 +601,19 @@ function AddCallForm({ client, onDone, googleConnected }: { client: Client; onDo
       <input style={inputStyle} placeholder="Titre du call" value={title} onChange={(e) => setTitle(e.target.value)} />
       {googleConnected && (
         <div>
-          <button onClick={searchDrive} disabled={driveLoading} style={{ ...secondaryBtnStyle, display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-            {driveLoading ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}
-            Rechercher dans Drive ({client.name.split(" ")[0]})
-          </button>
+          <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+            <input
+              value={driveQuery}
+              onChange={(e) => setDriveQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && searchDrive()}
+              placeholder="Mot-clé pour chercher dans Drive…"
+              style={{ flex: 1, padding: "7px 10px", border: "1px solid var(--border-color)", borderRadius: 8, fontSize: 12, fontFamily: "inherit", outline: "none" }}
+            />
+            <button onClick={searchDrive} disabled={driveLoading} style={{ ...secondaryBtnStyle, display: "flex", alignItems: "center", gap: 5, fontSize: 12, padding: "7px 12px", flexShrink: 0 }}>
+              {driveLoading ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Search size={12} />}
+              Drive
+            </button>
+          </div>
           {driveSearched && !driveLoading && driveFiles.length === 0 && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>Aucun fichier trouvé.</div>}
           {driveFiles.length > 0 && (
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
