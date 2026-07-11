@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   UserCheck,
+  Route,
 } from "lucide-react";
 
 const navItems = [
@@ -21,6 +22,7 @@ const navItems = [
   { href: "/clients", icon: UserCheck, label: "Suivi clients" },
   { href: "/calendrier", icon: Calendar, label: "Calendrier" },
   { href: "/instagram", icon: Camera, label: "Instagram" },
+  { href: "/acquisition", icon: Route, label: "Acquisition" },
   { href: "/tunnel", icon: Filter, label: "Tunnel de conversion" },
 ];
 

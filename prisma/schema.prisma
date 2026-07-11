@@ -44,6 +44,39 @@ model ManychatDmEvent {
   triggeredAt DateTime @default(now())
 }
 
+// Acquisition : chaque interaction ManyChat = un événement (commentaire, DM, guide envoyé, email donné…)
+// Une même personne peut avoir plusieurs événements (elle réagit à plusieurs vidéos).
+model ManychatEvent {
+  id          Int      @id @default(autoincrement())
+  contactId   String?  // ID ManyChat (jetable : peut disparaître au nettoyage mensuel)
+  handle      String?  // @ Instagram
+  name        String?  // nom du contact
+  email       String?  // email capturé dans le flow (pont vers Cal.com)
+  eventType   String   @default("dm")   // comment|dm|subscribed|email_captured|guide_sent|company|individual|custom
+  flowName    String?  // nom du flow ManyChat = la vidéo source
+  videoLabel  String?  // libellé lisible de la vidéo (dérivé du flow, éditable)
+  utmContent  String?  // au cas où un UTM arrive quand même
+  raw         String?  // payload brut JSON (debug / champs custom)
+  occurredAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([handle])
+  @@index([email])
+  @@index([flowName])
+}
+
+// Acquisition : lien manuel entre une identité ManyChat (handle) et un email Cal.com,
+// quand le pont automatique par email ne s'est pas fait.
+model AcquisitionLink {
+  id        Int      @id @default(autoincrement())
+  handle    String   @unique // @ Instagram côté ManyChat
+  email     String   // email côté Cal.com / prospect
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
 model ManualMetric {
   key       String   @id // ex: "reelsViews"
   value     Int      @default(0)
