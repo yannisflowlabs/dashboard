@@ -51,15 +51,33 @@ export async function GET() {
     const prospectByEmail = new Map(prospects.map((p) => [p.email.toLowerCase(), p]));
     const dealByEmail = new Map(businessInfos.map((b) => [b.clientEmail.toLowerCase(), b.dealAmount]));
 
-    // Regroupe les événements par identité (email prioritaire, sinon handle → email via lien, sinon handle brut)
-    const groups = new Map<string, typeof events>();
+    // Regroupe les événements par identité. Le handle ManyChat est la clé stable
+    // (une même personne peut changer/corriger son email en cours de route) :
+    // on fusionne d'abord par handle, puis on rattache l'email le plus récent connu.
+    // Si un événement n'a pas de handle (ex: lien manuel côté email seul), on retombe sur l'email.
+    const handleGroups = new Map<string, typeof events>();
+    const emailOnlyGroups = new Map<string, typeof events>();
     for (const e of events) {
-      const emailKey = e.email?.toLowerCase() ?? null;
       const handleKey = e.handle?.toLowerCase() ?? null;
-      const linkedEmail = handleKey ? handleToEmail.get(handleKey) ?? null : null;
-      const key = emailKey ?? linkedEmail ?? handleKey ?? `event-${e.id}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(e);
+      const emailKey = e.email?.toLowerCase() ?? null;
+      if (handleKey) {
+        if (!handleGroups.has(handleKey)) handleGroups.set(handleKey, []);
+        handleGroups.get(handleKey)!.push(e);
+      } else if (emailKey) {
+        if (!emailOnlyGroups.has(emailKey)) emailOnlyGroups.set(emailKey, []);
+        emailOnlyGroups.get(emailKey)!.push(e);
+      }
+    }
+    const groups = new Map<string, typeof events>();
+    for (const [handleKey, evs] of handleGroups) groups.set(handleKey, evs);
+    for (const [emailKey, evs] of emailOnlyGroups) {
+      // Si cet email correspond à un handle déjà regroupé (via lien manuel), on fusionne dedans
+      const linkedHandle = [...handleToEmail.entries()].find(([, em]) => em === emailKey)?.[0];
+      if (linkedHandle && groups.has(linkedHandle)) {
+        groups.get(linkedHandle)!.push(...evs);
+      } else {
+        groups.set(emailKey, evs);
+      }
     }
 
     const journeys: Journey[] = [];
@@ -67,10 +85,11 @@ export async function GET() {
       const sorted = evs.slice().sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
       const first = sorted[0];
 
-      // Résout l'identité consolidée
+      // Résout l'identité consolidée. On prend le DERNIER email/nom connu (le plus
+      // récent) : si la personne corrige son email en cours de route, on garde le bon.
       const handle = sorted.find((e) => e.handle)?.handle ?? null;
-      const name = sorted.find((e) => e.name)?.name ?? null;
-      const directEmail = sorted.find((e) => e.email)?.email?.toLowerCase() ?? null;
+      const name = [...sorted].reverse().find((e) => e.name)?.name ?? null;
+      const directEmail = [...sorted].reverse().find((e) => e.email)?.email?.toLowerCase() ?? null;
       const linkedEmail = handle ? handleToEmail.get(handle.toLowerCase()) ?? null : null;
       const email = directEmail ?? linkedEmail ?? null;
       const linkedManually = !directEmail && !!linkedEmail;
