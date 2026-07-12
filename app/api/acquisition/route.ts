@@ -166,17 +166,18 @@ export async function GET() {
     const individualsCount = journeys.filter((j) => j.segment === "individual").length;
 
     // Performance par vidéo (flow)
-    const byVideo = new Map<string, { flow: string; label: string; people: number; calls: number; clients: number; revenue: number }>();
+    const byVideo = new Map<string, { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number }>();
     for (const j of journeys) {
       const flow = j.firstVideoFlow;
       if (!flow) continue;
-      if (!byVideo.has(flow)) byVideo.set(flow, { flow, label: j.firstVideo ?? flow, people: 0, calls: 0, clients: 0, revenue: 0 });
+      if (!byVideo.has(flow)) byVideo.set(flow, { flow, label: j.firstVideo ?? flow, people: 0, companies: 0, calls: 0, clients: 0, revenue: 0 });
       const v = byVideo.get(flow)!;
       v.people++;
+      if (j.segment === "company") v.companies++;
       if (["call_booked", "call_done", "client"].includes(j.stage)) v.calls++;
       if (j.stage === "client") { v.clients++; v.revenue += j.dealAmount ?? 0; }
     }
-    const videos = [...byVideo.values()].sort((a, b) => b.clients - a.clients || b.calls - a.calls || b.people - a.people);
+    const videos = [...byVideo.values()].sort((a, b) => b.clients - a.clients || b.calls - a.calls || b.companies - a.companies || b.people - a.people);
 
     // Délai moyen 1er contact → call
     const delays = journeys.map((j) => j.daysToCall).filter((d): d is number => d !== null);

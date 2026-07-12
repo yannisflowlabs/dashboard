@@ -28,7 +28,7 @@ interface Journey {
   daysToCall: number | null;
   dealAmount: number | null;
 }
-interface VideoPerf { flow: string; label: string; people: number; calls: number; clients: number; revenue: number; }
+interface VideoPerf { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number; }
 interface Unlinked { key: string; handle: string | null; name: string | null; firstVideo: string | null; }
 interface AcqData {
   journeys: Journey[];
@@ -158,16 +158,17 @@ export default function AcquisitionPage() {
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Pas encore de vidéo identifiée.</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 46px 46px 46px 64px", gap: 8, fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", paddingBottom: 6, borderBottom: "1px solid var(--border-color)" }}>
-                  <span>Vidéo</span><span style={{ textAlign: "right" }}>Contacts</span><span style={{ textAlign: "right" }}>Calls</span><span style={{ textAlign: "right" }}>Clients</span><span style={{ textAlign: "right" }}>CA</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 46px 58px 46px 46px 64px", gap: 8, fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px", paddingBottom: 6, borderBottom: "1px solid var(--border-color)" }}>
+                  <span>Vidéo</span><span style={{ textAlign: "right" }}>Contacts</span><span style={{ textAlign: "right" }}>Entreprise</span><span style={{ textAlign: "right" }}>Calls</span><span style={{ textAlign: "right" }}>Clients</span><span style={{ textAlign: "right" }}>CA</span>
                 </div>
                 {data.videos.map((v) => (
-                  <div key={v.flow} style={{ display: "grid", gridTemplateColumns: "1fr 46px 46px 46px 64px", gap: 8, fontSize: 12, padding: "8px 0", borderBottom: "1px solid var(--border-color)", alignItems: "center" }}>
+                  <div key={v.flow} style={{ display: "grid", gridTemplateColumns: "1fr 46px 58px 46px 46px 64px", gap: 8, fontSize: 12, padding: "8px 0", borderBottom: "1px solid var(--border-color)", alignItems: "center" }}>
                     <span style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden" }}>
                       <Play size={11} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
                       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.label}</span>
                     </span>
                     <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>{v.people}</span>
+                    <span style={{ textAlign: "right", fontWeight: 600, color: v.companies > 0 ? "#2E5E28" : "var(--text-muted)" }}>{v.companies}</span>
                     <span style={{ textAlign: "right", color: "var(--text-secondary)" }}>{v.calls}</span>
                     <span style={{ textAlign: "right", fontWeight: 700, color: v.clients > 0 ? "#2E5E28" : "var(--text-muted)" }}>{v.clients}</span>
                     <span style={{ textAlign: "right", fontWeight: 700, color: v.revenue > 0 ? "#2E5E28" : "var(--text-muted)" }}>{v.revenue > 0 ? `${fmtNum(v.revenue)}€` : "—"}</span>
