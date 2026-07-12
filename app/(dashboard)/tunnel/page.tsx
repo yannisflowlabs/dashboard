@@ -310,6 +310,14 @@ export default function TunnelPage() {
         </Panel>
       </div>
 
+      {/* Business : valeur + vélocité */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" }}>
+        <KpiCard title="CA généré" value={business && business.totalRevenue > 0 ? `${business.totalRevenue.toLocaleString("fr-FR")} €` : "—"} sub={`sur ${period.label.toLowerCase()}`} accent="sage" icon={<Euro size={15} />} />
+        <KpiCard title="Panier moyen" value={business && business.avgDealSize > 0 ? `${business.avgDealSize.toLocaleString("fr-FR")} €` : "—"} sub="par client signé" accent="yellow" icon={<Target size={15} />} />
+        <KpiCard title="Vélocité" value={business?.avgVelocityDays != null ? `${business.avgVelocityDays} j` : "—"} sub="call → signature" accent="lavender" icon={<Clock size={15} />} />
+        <KpiCard title="Conv. globale" value={globalConv !== "—" ? `${globalConv}%` : "—"} sub="vues → client" accent="coral" icon={<TrendingUp size={15} />} />
+      </div>
+
       {/* Entonnoir façon Zentra */}
       <Panel title="Entonnoir de conversion">
         <FunnelChartV2 steps={funnelSteps} />
@@ -330,14 +338,6 @@ export default function TunnelPage() {
           ))}
         </div>
       </Panel>
-
-      {/* Business : valeur + vélocité */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginTop: "16px" }}>
-        <KpiCard title="CA généré" value={business && business.totalRevenue > 0 ? `${business.totalRevenue.toLocaleString("fr-FR")} €` : "—"} sub={`sur ${period.label.toLowerCase()}`} accent="sage" icon={<Euro size={15} />} />
-        <KpiCard title="Panier moyen" value={business && business.avgDealSize > 0 ? `${business.avgDealSize.toLocaleString("fr-FR")} €` : "—"} sub="par client signé" accent="yellow" icon={<Target size={15} />} />
-        <KpiCard title="Vélocité" value={business?.avgVelocityDays != null ? `${business.avgVelocityDays} j` : "—"} sub="call → signature" accent="lavender" icon={<Clock size={15} />} />
-        <KpiCard title="Conv. globale" value={globalConv !== "—" ? `${globalConv}%` : "—"} sub="vues → client" accent="coral" icon={<TrendingUp size={15} />} />
-      </div>
 
       {/* Performance par contenu */}
       <div style={{ marginTop: "16px" }}>
