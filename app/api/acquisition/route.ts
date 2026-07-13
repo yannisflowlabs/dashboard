@@ -26,6 +26,7 @@ interface Journey {
   segment: Segment;         // entreprise / particulier / pas encore qualifié
   daysToCall: number | null;   // délai 1er contact → call réservé
   dealAmount: number | null;
+  unknownOrigin?: boolean;  // call/client Cal.com sans parcours ManyChat rattaché
 }
 
 function daysBetween(a: string | Date, b: string | Date): number {
@@ -38,10 +39,14 @@ function computeAggregates(journeys: Journey[]) {
     comment: 0, dm: 0, subscribed: 0, email_captured: 0, guide_sent: 0, company: 0, call_booked: 0, call_done: 0, client: 0,
   };
   const companyIdx = STAGE_ORDER.indexOf("company");
+  const callBookedIdx = STAGE_ORDER.indexOf("call_booked");
   for (const j of journeys) {
     let idx = STAGE_ORDER.indexOf(j.stage);
     if (j.segment === "individual") idx = Math.min(idx, companyIdx - 1);
-    for (let i = 0; i <= idx; i++) funnel[STAGE_ORDER[i]]++;
+    // Orphelins Cal.com : origine inconnue, on ne les compte QUE sur les étapes
+    // à partir de "call réservé" (on ignore commentaire→guide qu'on ne connaît pas).
+    const startIdx = j.unknownOrigin ? callBookedIdx : 0;
+    for (let i = startIdx; i <= idx; i++) funnel[STAGE_ORDER[i]]++;
   }
 
   const individualsCount = journeys.filter((j) => j.segment === "individual").length;
@@ -122,6 +127,7 @@ export async function GET(req: NextRequest) {
     }
 
     const journeys: Journey[] = [];
+    const coveredEmails = new Set<string>(); // emails déjà rattachés à un parcours ManyChat
     for (const [key, evs] of groups) {
       const sorted = evs.slice().sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
       const first = sorted[0];
@@ -185,6 +191,41 @@ export async function GET(req: NextRequest) {
         segment,
         daysToCall: daysToCall !== null && daysToCall >= 0 ? daysToCall : null,
         dealAmount: email ? dealByEmail.get(email) ?? null : null,
+      });
+      if (email) coveredEmails.add(email);
+    }
+
+    // Prospects Cal.com orphelins : ils ont réservé un call / sont clients mais n'ont
+    // AUCUN parcours ManyChat (venus d'anciens DM, ou d'un email non capturé).
+    // On les ajoute au funnel à partir de "Call réservé" avec une origine inconnue.
+    for (const p of prospects) {
+      const emailKey = p.email.toLowerCase();
+      if (coveredEmails.has(emailKey)) continue;
+      if (!["call_booked", "call_done", "proposal_sent", "client"].includes(p.stage)) continue;
+
+      let stage: Stage = "call_booked";
+      let clientSince: string | null = null;
+      if (["call_done", "proposal_sent", "client"].includes(p.stage)) stage = "call_done";
+      if (p.stage === "client") { stage = "client"; clientSince = p.clientSince?.toISOString() ?? null; }
+      const callBookedAt = (p.stageUpdatedAt ?? p.createdAt)?.toISOString() ?? null;
+
+      journeys.push({
+        key: `prospect-${emailKey}`,
+        handle: null,
+        name: p.name,
+        email: p.email,
+        linkedManually: false,
+        firstVideo: null,
+        firstVideoFlow: null,
+        events: [],
+        firstTouchAt: callBookedAt, // on ne connaît pas de contact plus ancien
+        callBookedAt,
+        clientSince,
+        stage,
+        segment: "company", // un call/client est traité comme cible entreprise
+        daysToCall: null,
+        dealAmount: dealByEmail.get(emailKey) ?? null,
+        unknownOrigin: true,
       });
     }
 

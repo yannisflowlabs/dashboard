@@ -29,6 +29,7 @@ interface Journey {
   segment: "company" | "individual" | null;
   daysToCall: number | null;
   dealAmount: number | null;
+  unknownOrigin?: boolean;
 }
 interface VideoPerf { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number; }
 interface Unlinked { key: string; handle: string | null; name: string | null; firstVideo: string | null; }
@@ -413,8 +414,8 @@ function JourneyRow({ j }: { j: Journey }) {
             {j.linkedManually && <span title="Relié manuellement" style={{ fontSize: 9, fontWeight: 700, color: "#3E3680", background: "rgba(184,176,232,0.2)", borderRadius: 4, padding: "1px 5px" }}>lié</span>}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-            {j.firstVideo ? `Via « ${j.firstVideo} »` : "Vidéo inconnue"} · 1er contact {fmtDate(j.firstTouchAt)}
-            {j.daysToCall !== null && ` · call en ${j.daysToCall} j`}
+            {j.unknownOrigin ? "Réservé hors tracking ManyChat" : (j.firstVideo ? `Via « ${j.firstVideo} »` : "Vidéo inconnue")} · {j.unknownOrigin ? "call" : "1er contact"} {fmtDate(j.firstTouchAt)}
+            {!j.unknownOrigin && j.daysToCall !== null && ` · call en ${j.daysToCall} j`}
           </div>
         </div>
         {j.dealAmount ? <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 12, fontWeight: 700, color: "#2E5E28" }}><Euro size={11} />{fmtNum(j.dealAmount)}</span> : null}
@@ -428,6 +429,11 @@ function JourneyRow({ j }: { j: Journey }) {
       </button>
       {open && (
         <div style={{ padding: "4px 12px 12px 12px", borderTop: "1px solid var(--border-color)" }}>
+          {j.unknownOrigin && (
+            <div style={{ fontSize: 11, color: "var(--text-muted)", background: "var(--surface-2, #F5F2EE)", borderRadius: 8, padding: "8px 10px", marginTop: 8, lineHeight: 1.5 }}>
+              Ce contact a réservé un call sans passer par le tracking ManyChat (ancien DM, ou email non capturé). On ne connaît pas la vidéo ni le chemin d&apos;origine.
+            </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 0, marginTop: 8 }}>
             {j.events.map((e, i) => (
               <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, paddingBottom: i < j.events.length - 1 ? 12 : 0, position: "relative" }}>
