@@ -186,9 +186,9 @@ export default function AcquisitionPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18, alignItems: "start" }}>
         {/* Performance par vidéo — top 10 */}
         <Panel title={`Vidéos les plus performantes${data.videos.length > TOP_VIDEOS ? ` (top ${TOP_VIDEOS})` : ""}`} padding="20px"
-          action={data.videos.length > TOP_VIDEOS ? (
+          action={data.videos.length > 0 ? (
             <button onClick={() => { setVideoSearch(""); setVideoModal(true); }} style={linkActionStyle}>
-              Voir tout ({data.videos.length}) <ArrowUpRight size={12} />
+              {data.videos.length > TOP_VIDEOS ? `Voir tout (${data.videos.length})` : "Rechercher"} <ArrowUpRight size={12} />
             </button>
           ) : undefined}>
           <div style={{ padding: "12px 20px 4px" }}>
@@ -403,7 +403,7 @@ function JourneyRow({ j }: { j: Journey }) {
   const stageColor = STAGE_COLORS[j.stage] ?? "#B8B0E8";
 
   return (
-    <div style={{ border: "1px solid var(--border-color)", borderRadius: 10, overflow: "hidden" }}>
+    <div style={{ border: "1px solid var(--border-color)", borderRadius: 10, overflow: "hidden", flexShrink: 0 }}>
       <button onClick={() => setOpen(!open)}
         style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "10px 12px", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
