@@ -212,9 +212,10 @@ export async function GET(req: NextRequest) {
       if (p.stage === "client") { stage = "client"; clientSince = p.clientSince?.toISOString() ?? null; }
       const callBookedAt = (p.stageUpdatedAt ?? p.createdAt)?.toISOString() ?? null;
 
-      // Date de référence : signature pour un client, sinon date du call. Exclut l'avant-tracking.
-      const refDate = clientSince ?? callBookedAt;
-      if (!refDate || new Date(refDate).getTime() < TRACKING_START) continue;
+      // Seuil basé sur la date de RÉSERVATION (createdAt = entrée dans le système),
+      // pas la date du call qui peut être plus tard. Exclut l'avant-tracking.
+      const bookedAt = p.createdAt ? new Date(p.createdAt).getTime() : null;
+      if (bookedAt === null || bookedAt < TRACKING_START) continue;
 
       journeys.push({
         key: `prospect-${emailKey}`,
