@@ -373,15 +373,19 @@ export default function CRMPage() {
     }
   };
 
-  // Filtrage par période (date de création du prospect)
+  // Filtrage par période (date de référence du prospect)
   const fromT = new Date(period.from + "T00:00:00").getTime();
   const toT = new Date(period.to + "T23:59:59").getTime();
+  const nowT = Date.now();
   const visibleProspects = prospects.filter(p => {
     // Clients → clientSince, autres stages → stageUpdatedAt, fallback createdAt
     const ref = p.stage === "client" && p.clientSince
       ? p.clientSince
       : (p.stageUpdatedAt ?? p.createdAt);
     const t = new Date(ref).getTime();
+    // Un call à venir (date de référence dans le futur) doit rester visible :
+    // le prospect est entré dans le pipeline maintenant, même si le call est plus tard.
+    if (t > nowT) return true;
     return t >= fromT && t <= toT;
   });
 
