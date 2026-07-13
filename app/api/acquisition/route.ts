@@ -198,6 +198,9 @@ export async function GET(req: NextRequest) {
     // Prospects Cal.com orphelins : ils ont réservé un call / sont clients mais n'ont
     // AUCUN parcours ManyChat (venus d'anciens DM, ou d'un email non capturé).
     // On les ajoute au funnel à partir de "Call réservé" avec une origine inconnue.
+    // Seuil : uniquement à partir du début du tracking ManyChat (12 juillet 2026),
+    // sinon les anciens calls/clients fausseraient les taux de conversion.
+    const TRACKING_START = new Date("2026-07-12T00:00:00").getTime();
     for (const p of prospects) {
       const emailKey = p.email.toLowerCase();
       if (coveredEmails.has(emailKey)) continue;
@@ -208,6 +211,10 @@ export async function GET(req: NextRequest) {
       if (["call_done", "proposal_sent", "client"].includes(p.stage)) stage = "call_done";
       if (p.stage === "client") { stage = "client"; clientSince = p.clientSince?.toISOString() ?? null; }
       const callBookedAt = (p.stageUpdatedAt ?? p.createdAt)?.toISOString() ?? null;
+
+      // Date de référence : signature pour un client, sinon date du call. Exclut l'avant-tracking.
+      const refDate = clientSince ?? callBookedAt;
+      if (!refDate || new Date(refDate).getTime() < TRACKING_START) continue;
 
       journeys.push({
         key: `prospect-${emailKey}`,
