@@ -32,21 +32,25 @@ export async function POST(req: NextRequest) {
     const eventType = pick(body, ["event_type", "type", "step"]) ?? "dm";
     const utmContent = pick(body, ["utm_content", "utm"]);
 
-    // Nouveau modèle riche : un événement par interaction
-    await getPrisma().manychatEvent.create({
-      data: {
-        contactId,
-        handle,
-        name,
-        email,
-        eventType,
-        flowName,
-        videoLabel: videoLabelFromFlow(flowName),
-        utmContent,
-        raw: JSON.stringify(body).slice(0, 4000),
-        occurredAt: new Date(),
-      },
-    });
+    // Nouveau modèle riche : un événement par interaction.
+    // Sans identité (ni handle ni email), l'événement est inexploitable pour
+    // reconstruire un parcours nominatif — on ne pollue pas ManychatEvent avec.
+    if (handle || email) {
+      await getPrisma().manychatEvent.create({
+        data: {
+          contactId,
+          handle,
+          name,
+          email,
+          eventType,
+          flowName,
+          videoLabel: videoLabelFromFlow(flowName),
+          utmContent,
+          raw: JSON.stringify(body).slice(0, 4000),
+          occurredAt: new Date(),
+        },
+      });
+    }
 
     // Compat : on garde l'ancien compteur agrégé pour le tunnel existant
     await getPrisma().manychatDmEvent.create({
