@@ -32,9 +32,50 @@ function daysBetween(a: string | Date, b: string | Date): number {
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60 * 24));
 }
 
-export async function GET() {
+// Calcule les agrégats (funnel, vidéos, délais) pour un ensemble de parcours.
+function computeAggregates(journeys: Journey[]) {
+  const funnel: Record<Stage, number> = {
+    comment: 0, dm: 0, subscribed: 0, email_captured: 0, guide_sent: 0, company: 0, call_booked: 0, call_done: 0, client: 0,
+  };
+  const companyIdx = STAGE_ORDER.indexOf("company");
+  for (const j of journeys) {
+    let idx = STAGE_ORDER.indexOf(j.stage);
+    if (j.segment === "individual") idx = Math.min(idx, companyIdx - 1);
+    for (let i = 0; i <= idx; i++) funnel[STAGE_ORDER[i]]++;
+  }
+
+  const individualsCount = journeys.filter((j) => j.segment === "individual").length;
+
+  const byVideo = new Map<string, { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number }>();
+  for (const j of journeys) {
+    const flow = j.firstVideoFlow;
+    if (!flow) continue;
+    if (!byVideo.has(flow)) byVideo.set(flow, { flow, label: j.firstVideo ?? flow, people: 0, companies: 0, calls: 0, clients: 0, revenue: 0 });
+    const v = byVideo.get(flow)!;
+    v.people++;
+    if (j.segment === "company") v.companies++;
+    if (["call_booked", "call_done", "client"].includes(j.stage)) v.calls++;
+    if (j.stage === "client") { v.clients++; v.revenue += j.dealAmount ?? 0; }
+  }
+  const videos = [...byVideo.values()].sort((a, b) => b.clients - a.clients || b.calls - a.calls || b.companies - a.companies || b.people - a.people);
+
+  const delays = journeys.map((j) => j.daysToCall).filter((d): d is number => d !== null);
+  const avgDaysToCall = delays.length ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : null;
+
+  return {
+    funnel, individualsCount, videos, avgDaysToCall,
+    totalPeople: journeys.length,
+    clients: funnel.client,
+    calls: funnel.call_booked,
+  };
+}
+
+export async function GET(req: NextRequest) {
   try {
     const prisma = getPrisma();
+    const url = new URL(req.url);
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
 
     const [events, links, prospects, businessInfos] = await Promise.all([
       prisma.manychatEvent.findMany({ orderBy: { occurredAt: "asc" } }),
@@ -149,51 +190,84 @@ export async function GET() {
 
     journeys.sort((a, b) => new Date(b.firstTouchAt ?? 0).getTime() - new Date(a.firstTouchAt ?? 0).getTime());
 
-    // Funnel agrégé cumulatif (nb de personnes ayant atteint au moins chaque étape).
-    // Les particuliers sont écartés après le guide : ils ne comptent PAS dans "company" et au-delà.
-    const funnel: Record<Stage, number> = {
-      comment: 0, dm: 0, subscribed: 0, email_captured: 0, guide_sent: 0, company: 0, call_booked: 0, call_done: 0, client: 0,
+    // Filtrage par cohorte : on segmente sur la DATE DU 1ER CONTACT.
+    // Période courante (défaut = tout) + période précédente de même durée pour comparaison.
+    const rangeStart = fromParam ? new Date(fromParam + "T00:00:00").getTime() : null;
+    const rangeEnd = toParam ? new Date(toParam + "T23:59:59").getTime() : null;
+    const inRange = (iso: string | null) => {
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      if (rangeStart !== null && t < rangeStart) return false;
+      if (rangeEnd !== null && t > rangeEnd) return false;
+      return true;
     };
-    const companyIdx = STAGE_ORDER.indexOf("company");
-    for (const j of journeys) {
-      let idx = STAGE_ORDER.indexOf(j.stage);
-      // Un particulier ne peut pas dépasser le guide dans l'entonnoir principal
-      if (j.segment === "individual") idx = Math.min(idx, companyIdx - 1);
-      for (let i = 0; i <= idx; i++) funnel[STAGE_ORDER[i]]++;
+
+    const current = (rangeStart !== null || rangeEnd !== null)
+      ? journeys.filter((j) => inRange(j.firstTouchAt))
+      : journeys;
+
+    // Période précédente : même durée, juste avant
+    let previousAgg: ReturnType<typeof computeAggregates> | null = null;
+    let previousRange: { from: string; to: string } | null = null;
+    if (rangeStart !== null && rangeEnd !== null) {
+      const duration = rangeEnd - rangeStart;
+      const prevEnd = rangeStart - 1;
+      const prevStart = prevEnd - duration;
+      const prev = journeys.filter((j) => {
+        if (!j.firstTouchAt) return false;
+        const t = new Date(j.firstTouchAt).getTime();
+        return t >= prevStart && t <= prevEnd;
+      });
+      previousAgg = computeAggregates(prev);
+      previousRange = {
+        from: new Date(prevStart).toISOString().slice(0, 10),
+        to: new Date(prevEnd).toISOString().slice(0, 10),
+      };
     }
 
-    // Particuliers écartés (sortie qualifiée, comptée à part)
-    const individualsCount = journeys.filter((j) => j.segment === "individual").length;
+    const agg = computeAggregates(current);
 
-    // Performance par vidéo (flow)
-    const byVideo = new Map<string, { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number }>();
-    for (const j of journeys) {
-      const flow = j.firstVideoFlow;
-      if (!flow) continue;
-      if (!byVideo.has(flow)) byVideo.set(flow, { flow, label: j.firstVideo ?? flow, people: 0, companies: 0, calls: 0, clients: 0, revenue: 0 });
-      const v = byVideo.get(flow)!;
-      v.people++;
-      if (j.segment === "company") v.companies++;
-      if (["call_booked", "call_done", "client"].includes(j.stage)) v.calls++;
-      if (j.stage === "client") { v.clients++; v.revenue += j.dealAmount ?? 0; }
-    }
-    const videos = [...byVideo.values()].sort((a, b) => b.clients - a.clients || b.calls - a.calls || b.companies - a.companies || b.people - a.people);
-
-    // Délai moyen 1er contact → call
-    const delays = journeys.map((j) => j.daysToCall).filter((d): d is number => d !== null);
-    const avgDaysToCall = delays.length ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : null;
+    // Prospects à relancer : bloqués à une étape depuis un moment, pas encore convertis.
+    // On regarde le dernier événement de chaque parcours et son ancienneté.
+    const now = Date.now();
+    const STALE_DAYS = 4; // seuil de relance
+    const toFollowUp = current
+      .filter((j) => {
+        // pas encore de call ni client → cible de relance
+        if (["call_booked", "call_done", "client"].includes(j.stage)) return false;
+        if (j.segment === "individual") return false; // particulier écarté, pas de relance
+        const lastEvent = j.events[j.events.length - 1];
+        if (!lastEvent) return false;
+        const daysSince = Math.floor((now - new Date(lastEvent.at).getTime()) / (1000 * 60 * 60 * 24));
+        return daysSince >= STALE_DAYS;
+      })
+      .map((j) => {
+        const lastEvent = j.events[j.events.length - 1];
+        const daysSince = Math.floor((now - new Date(lastEvent.at).getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          key: j.key, handle: j.handle, name: j.name, email: j.email,
+          stage: j.stage, firstVideo: j.firstVideo, daysSinceLastEvent: daysSince,
+        };
+      })
+      .sort((a, b) => b.daysSinceLastEvent - a.daysSinceLastEvent);
 
     // Personnes non reliées (handle sans email) → candidates au lien manuel
-    const unlinked = journeys.filter((j) => !j.email && j.handle).map((j) => ({ key: j.key, handle: j.handle, name: j.name, firstVideo: j.firstVideo }));
+    const unlinked = current.filter((j) => !j.email && j.handle).map((j) => ({ key: j.key, handle: j.handle, name: j.name, firstVideo: j.firstVideo }));
 
     return NextResponse.json({
-      journeys,
-      funnel,
-      individualsCount,
-      videos,
-      avgDaysToCall,
+      journeys: current,
+      funnel: agg.funnel,
+      individualsCount: agg.individualsCount,
+      videos: agg.videos,
+      avgDaysToCall: agg.avgDaysToCall,
+      totalPeople: agg.totalPeople,
+      previous: previousAgg
+        ? { funnel: previousAgg.funnel, totalPeople: previousAgg.totalPeople, clients: previousAgg.clients, calls: previousAgg.calls, individualsCount: previousAgg.individualsCount }
+        : null,
+      previousRange,
+      toFollowUp,
       unlinked,
-      totalPeople: journeys.length,
+      range: (rangeStart !== null && rangeEnd !== null) ? { from: fromParam, to: toParam } : null,
       updatedAt: new Date().toISOString(),
     });
   } catch (err: unknown) {
