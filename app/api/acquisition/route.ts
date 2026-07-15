@@ -27,6 +27,7 @@ interface Journey {
   daysToCall: number | null;   // délai 1er contact → call réservé
   dealAmount: number | null;
   unknownOrigin?: boolean;  // call/client Cal.com sans parcours ManyChat rattaché
+  attributedManually?: boolean; // vidéo attribuée à la main
 }
 
 function daysBetween(a: string | Date, b: string | Date): number {
@@ -90,6 +91,9 @@ export async function GET(req: NextRequest) {
       }),
       prisma.clientBusinessInfo.findMany({ select: { clientEmail: true, dealAmount: true } }),
     ]);
+
+    const videoAttributions = await prisma.manualVideoAttribution.findMany();
+    const attributionByEmail = new Map(videoAttributions.map((a) => [a.email.toLowerCase(), a]));
 
     // handle → email (liens manuels)
     const handleToEmail = new Map(links.map((l) => [l.handle.toLowerCase(), l.email.toLowerCase()]));
@@ -212,10 +216,14 @@ export async function GET(req: NextRequest) {
       if (p.stage === "client") { stage = "client"; clientSince = p.clientSince?.toISOString() ?? null; }
       const callBookedAt = (p.stageUpdatedAt ?? p.createdAt)?.toISOString() ?? null;
 
+      // Attribution manuelle d'une vidéo → on reconstruit le parcours complet.
+      const attribution = attributionByEmail.get(emailKey);
+
       // Seuil basé sur la date de RÉSERVATION (createdAt = entrée dans le système),
       // pas la date du call qui peut être plus tard. Exclut l'avant-tracking.
+      // Une attribution manuelle force l'inclusion même hors seuil (choix explicite de l'utilisateur).
       const bookedAt = p.createdAt ? new Date(p.createdAt).getTime() : null;
-      if (bookedAt === null || bookedAt < TRACKING_START) continue;
+      if (!attribution && (bookedAt === null || bookedAt < TRACKING_START)) continue;
 
       journeys.push({
         key: `prospect-${emailKey}`,
@@ -223,8 +231,8 @@ export async function GET(req: NextRequest) {
         name: p.name,
         email: p.email,
         linkedManually: false,
-        firstVideo: null,
-        firstVideoFlow: null,
+        firstVideo: attribution?.videoLabel ?? null,
+        firstVideoFlow: attribution?.videoFlow ?? null,
         events: [],
         firstTouchAt: callBookedAt, // on ne connaît pas de contact plus ancien
         callBookedAt,
@@ -233,7 +241,10 @@ export async function GET(req: NextRequest) {
         segment: "company", // un call/client est traité comme cible entreprise
         daysToCall: null,
         dealAmount: dealByEmail.get(emailKey) ?? null,
-        unknownOrigin: true,
+        // Attribué manuellement → parcours reconstruit (compte dans tout le funnel).
+        // Sinon → origine inconnue (compte à partir de "Call réservé" seulement).
+        unknownOrigin: !attribution,
+        attributedManually: !!attribution,
       });
     }
 
@@ -303,6 +314,19 @@ export async function GET(req: NextRequest) {
     // Personnes non reliées (handle sans email) → candidates au lien manuel
     const unlinked = current.filter((j) => !j.email && j.handle).map((j) => ({ key: j.key, handle: j.handle, name: j.name, firstVideo: j.firstVideo }));
 
+    // Calls "origine inconnue" → candidats à l'attribution manuelle d'une vidéo
+    const toAttribute = current
+      .filter((j) => j.unknownOrigin && j.email)
+      .map((j) => ({ email: j.email, name: j.name, stage: j.stage, callBookedAt: j.callBookedAt }));
+
+    // Liste des vidéos connues (pour la liste déroulante d'attribution)
+    const knownVideos = [...new Set(events.map((e) => e.flowName).filter((f): f is string => !!f && f.trim() !== "" && f !== "null"))]
+      .map((flow) => {
+        const ev = events.find((e) => e.flowName === flow);
+        return { flow, label: ev?.videoLabel ?? flow };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+
     return NextResponse.json({
       journeys: current,
       funnel: agg.funnel,
@@ -316,6 +340,8 @@ export async function GET(req: NextRequest) {
       previousRange,
       toFollowUp,
       unlinked,
+      toAttribute,
+      knownVideos,
       range: (rangeStart !== null && rangeEnd !== null) ? { from: fromParam, to: toParam } : null,
       updatedAt: new Date().toISOString(),
     });
@@ -325,10 +351,32 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST — crée un lien manuel handle → email
+// POST — deux usages selon le body :
+//  - { handle, email } → lien manuel handle → email
+//  - { email, videoFlow, videoLabel } → attribution manuelle d'une vidéo à un call orphelin
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // Attribution d'une vidéo
+    if (body.videoFlow !== undefined || body.videoLabel !== undefined) {
+      const email = (body.email as string | undefined)?.trim().toLowerCase();
+      const videoLabel = (body.videoLabel as string | undefined)?.trim();
+      // flow dérivé du label si non fourni (saisie libre)
+      const videoFlow = ((body.videoFlow as string | undefined)?.trim())
+        || videoLabel?.toLowerCase().replace(/\s+/g, "-");
+      if (!email || !videoLabel || !videoFlow) {
+        return NextResponse.json({ error: "email et vidéo requis" }, { status: 400 });
+      }
+      const attribution = await getPrisma().manualVideoAttribution.upsert({
+        where: { email },
+        update: { videoFlow, videoLabel },
+        create: { email, videoFlow, videoLabel },
+      });
+      return NextResponse.json({ ok: true, attribution });
+    }
+
+    // Lien handle → email
     const handle = (body.handle as string | undefined)?.trim().replace(/^@/, "");
     const email = (body.email as string | undefined)?.trim().toLowerCase();
     if (!handle || !email) {
@@ -346,10 +394,16 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE ?handle=xxx — supprime un lien manuel
+// DELETE ?handle=xxx (lien) OU ?attributionEmail=xxx (attribution vidéo)
 export async function DELETE(req: NextRequest) {
   try {
-    const handle = new URL(req.url).searchParams.get("handle")?.replace(/^@/, "");
+    const url = new URL(req.url);
+    const attributionEmail = url.searchParams.get("attributionEmail")?.trim().toLowerCase();
+    if (attributionEmail) {
+      await getPrisma().manualVideoAttribution.delete({ where: { email: attributionEmail } });
+      return NextResponse.json({ ok: true });
+    }
+    const handle = url.searchParams.get("handle")?.replace(/^@/, "");
     if (!handle) return NextResponse.json({ error: "handle requis" }, { status: 400 });
     await getPrisma().acquisitionLink.delete({ where: { handle } });
     return NextResponse.json({ ok: true });

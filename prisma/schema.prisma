@@ -77,6 +77,15 @@ model AcquisitionLink {
   @@index([email])
 }
 
+// Acquisition : attribution manuelle d'une vidéo à un prospect Cal.com "origine inconnue"
+// (call/client venu d'un ancien DM, non tracké). Reconstruit son parcours complet.
+model ManualVideoAttribution {
+  email      String   @id // email Cal.com / prospect
+  videoFlow  String   // flow_name attribué (existant ou saisi)
+  videoLabel String   // libellé lisible de la vidéo
+  createdAt  DateTime @default(now())
+}
+
 model ManualMetric {
   key       String   @id // ex: "reelsViews"
   value     Int      @default(0)

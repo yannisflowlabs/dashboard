@@ -35,6 +35,8 @@ interface VideoPerf { flow: string; label: string; people: number; companies: nu
 interface Unlinked { key: string; handle: string | null; name: string | null; firstVideo: string | null; }
 interface FollowUp { key: string; handle: string | null; name: string | null; email: string | null; stage: string; firstVideo: string | null; daysSinceLastEvent: number; }
 interface PrevAgg { funnel: Record<string, number>; totalPeople: number; clients: number; calls: number; individualsCount: number; }
+interface ToAttribute { email: string; name: string | null; stage: string; callBookedAt: string | null; }
+interface KnownVideo { flow: string; label: string; }
 interface AcqData {
   journeys: Journey[];
   funnel: Record<string, number>;
@@ -46,6 +48,8 @@ interface AcqData {
   previous: PrevAgg | null;
   previousRange: { from: string; to: string } | null;
   toFollowUp: FollowUp[];
+  toAttribute: ToAttribute[];
+  knownVideos: KnownVideo[];
   range: { from: string; to: string } | null;
   updatedAt: string;
 }
@@ -204,6 +208,11 @@ export default function AcquisitionPage() {
         {/* Liens manuels à faire */}
         <ManualLinkPanel unlinked={data.unlinked} onLinked={load} />
       </div>
+
+      {/* Calls à rattacher à une vidéo */}
+      {data.toAttribute.length > 0 && (
+        <AttributeVideoPanel items={data.toAttribute} knownVideos={data.knownVideos} onAttributed={load} />
+      )}
 
       {/* Parcours nominatifs — 20 derniers */}
       <Panel title={`Parcours${data.journeys.length > TOP_JOURNEYS ? ` (${TOP_JOURNEYS} derniers sur ${data.journeys.length})` : ` (${data.journeys.length})`}`} padding="20px"
@@ -524,6 +533,83 @@ function ManualLinkPanel({ unlinked, onLinked }: { unlinked: Unlinked[]; onLinke
             </div>
           </>
         )}
+      </div>
+    </Panel>
+  );
+}
+
+// Panneau : rattacher un call "origine inconnue" à une vidéo
+function AttributeVideoPanel({ items, knownVideos, onAttributed }: { items: ToAttribute[]; knownVideos: KnownVideo[]; onAttributed: () => void }) {
+  const [active, setActive] = useState<string | null>(null);
+  const [selected, setSelected] = useState("");   // flow choisi dans la liste
+  const [freeText, setFreeText] = useState("");    // saisie libre
+  const [saving, setSaving] = useState(false);
+
+  async function attribute(email: string) {
+    // Priorité à la saisie libre si remplie, sinon la sélection
+    let videoLabel = "", videoFlow = "";
+    if (freeText.trim()) {
+      videoLabel = freeText.trim();
+      videoFlow = ""; // le backend dérivera le flow depuis le label
+    } else if (selected) {
+      const v = knownVideos.find((k) => k.flow === selected);
+      if (!v) return;
+      videoLabel = v.label; videoFlow = v.flow;
+    } else return;
+
+    setSaving(true);
+    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, videoFlow, videoLabel }) });
+    setSaving(false); setActive(null); setSelected(""); setFreeText(""); onAttributed();
+  }
+
+  return (
+    <Panel title="Calls à rattacher à une vidéo" padding="20px" style={{ marginBottom: 18 }}>
+      <div style={{ padding: "12px 20px 4px" }}>
+        <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
+          Ces calls sont arrivés sans parcours ManyChat (ancien DM, email non capturé). Attribue-leur une vidéo source pour reconstruire leur parcours complet et créditer la bonne vidéo.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((it) => (
+            <div key={it.email} style={{ border: "1px solid var(--border-color)", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{cleanName(it.name) ?? it.email}</div>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{it.email} · {STAGE_LABELS[it.stage] ?? it.stage}{it.callBookedAt ? ` · call ${fmtDate(it.callBookedAt)}` : ""}</div>
+                </div>
+                {active !== it.email && (
+                  <button onClick={() => { setActive(it.email); setSelected(""); setFreeText(""); }}
+                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "#2E5E28", background: "rgba(168,197,160,0.15)", border: "1px solid rgba(168,197,160,0.4)", borderRadius: 6, padding: "5px 9px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                    <Play size={11} /> Attribuer une vidéo
+                  </button>
+                )}
+              </div>
+              {active === it.email && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                  <select value={selected} onChange={(e) => { setSelected(e.target.value); setFreeText(""); }}
+                    style={{ padding: "7px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", background: "#FFF" }}>
+                    <option value="">— Choisir une vidéo existante —</option>
+                    {knownVideos.map((v) => <option key={v.flow} value={v.flow}>{v.label}</option>)}
+                  </select>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: "var(--text-muted)" }}>
+                    <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} /> ou saisir un nom <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={freeText} onChange={(e) => { setFreeText(e.target.value); setSelected(""); }} onKeyDown={(e) => e.key === "Enter" && attribute(it.email)} placeholder="Nom d'une vidéo (saisie libre)"
+                      style={{ flex: 1, padding: "6px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                    <button onClick={() => attribute(it.email)} disabled={saving || (!selected && !freeText.trim())}
+                      style={{ padding: "6px 12px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, opacity: (!selected && !freeText.trim()) ? 0.5 : 1 }}>
+                      {saving ? "…" : "OK"}
+                    </button>
+                    <button onClick={() => setActive(null)}
+                      style={{ padding: "6px 10px", background: "none", color: "var(--text-muted)", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </Panel>
   );
