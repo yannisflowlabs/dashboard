@@ -30,6 +30,7 @@ interface Journey {
   daysToCall: number | null;
   dealAmount: number | null;
   unknownOrigin?: boolean;
+  attributedManually?: boolean;
 }
 interface VideoPerf { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number; }
 interface Unlinked { key: string; handle: string | null; name: string | null; firstVideo: string | null; }
@@ -222,12 +223,12 @@ export default function AcquisitionPage() {
           </button>
         ) : undefined}>
         <div style={{ padding: "12px 20px 8px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {topJourneys.map((j) => <JourneyRow key={j.key} j={j} />)}
+          {topJourneys.map((j) => <JourneyRow key={j.key} j={j} knownVideos={data.knownVideos} onRefresh={load} />)}
         </div>
       </Panel>
 
       {videoModal && <VideoModal videos={data.videos} onClose={() => setVideoModal(false)} />}
-      {journeyModal && <JourneyModal journeys={data.journeys} onClose={() => setJourneyModal(false)} />}
+      {journeyModal && <JourneyModal journeys={data.journeys} knownVideos={data.knownVideos} onRefresh={load} onClose={() => setJourneyModal(false)} />}
     </div>
   );
 }
@@ -352,7 +353,7 @@ function VideoModal({ videos, onClose }: { videos: VideoPerf[]; onClose: () => v
 }
 
 // Modale : tous les parcours avec recherche + filtres
-function JourneyModal({ journeys, onClose }: { journeys: Journey[]; onClose: () => void }) {
+function JourneyModal({ journeys, knownVideos, onRefresh, onClose }: { journeys: Journey[]; knownVideos: KnownVideo[]; onRefresh: () => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [segmentFilter, setSegmentFilter] = useState<string>("all");
@@ -402,13 +403,13 @@ function JourneyModal({ journeys, onClose }: { journeys: Journey[]; onClose: () 
       </div>
       <div style={{ overflowY: "auto", padding: "12px 20px 20px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{filtered.length} résultat{filtered.length > 1 ? "s" : ""}</div>
-        {filtered.length === 0 ? <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "20px 0" }}>Aucun parcours ne correspond.</div> : filtered.map((j) => <JourneyRow key={j.key} j={j} />)}
+        {filtered.length === 0 ? <div style={{ fontSize: 12, color: "var(--text-muted)", padding: "20px 0" }}>Aucun parcours ne correspond.</div> : filtered.map((j) => <JourneyRow key={j.key} j={j} knownVideos={knownVideos} onRefresh={onRefresh} />)}
       </div>
     </Modal>
   );
 }
 
-function JourneyRow({ j }: { j: Journey }) {
+function JourneyRow({ j, knownVideos, onRefresh }: { j: Journey; knownVideos?: KnownVideo[]; onRefresh?: () => void }) {
   const [open, setOpen] = useState(false);
   const stageColor = STAGE_COLORS[j.stage] ?? "#B8B0E8";
 
@@ -421,6 +422,7 @@ function JourneyRow({ j }: { j: Journey }) {
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>{cleanName(j.name) ?? (j.handle ? `@${j.handle}` : "Inconnu")}</span>
             {j.handle && cleanName(j.name) && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>@{j.handle}</span>}
             {j.linkedManually && <span title="Relié manuellement" style={{ fontSize: 9, fontWeight: 700, color: "#3E3680", background: "rgba(184,176,232,0.2)", borderRadius: 4, padding: "1px 5px" }}>lié</span>}
+            {j.attributedManually && <span title="Vidéo attribuée manuellement" style={{ fontSize: 9, fontWeight: 700, color: "#2E5E28", background: "rgba(168,197,160,0.2)", borderRadius: 4, padding: "1px 5px" }}>vidéo manuelle</span>}
           </div>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
             {j.unknownOrigin ? "Réservé hors tracking ManyChat" : (j.firstVideo ? `Via « ${j.firstVideo} »` : "Vidéo inconnue")} · {j.unknownOrigin ? "call" : "1er contact"} {fmtDate(j.firstTouchAt)}
@@ -460,6 +462,62 @@ function JourneyRow({ j }: { j: Journey }) {
             ))}
             {j.callBookedAt && <TimelinePoint icon={<PhoneCall size={11} />} label="Call réservé" date={j.callBookedAt} />}
             {j.clientSince && <TimelinePoint icon={<UserCheck size={11} />} label="Devenu client" date={j.clientSince} last />}
+          </div>
+          {j.attributedManually && j.email && knownVideos && onRefresh && (
+            <EditAttribution email={j.email} currentVideo={j.firstVideo} knownVideos={knownVideos} onRefresh={onRefresh} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Édition/retrait d'une attribution vidéo manuelle depuis la ligne de parcours
+function EditAttribution({ email, currentVideo, knownVideos, onRefresh }: { email: string; currentVideo: string | null; knownVideos: KnownVideo[]; onRefresh: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [selected, setSelected] = useState("");
+  const [freeText, setFreeText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    let videoLabel = "", videoFlow = "";
+    if (freeText.trim()) { videoLabel = freeText.trim(); videoFlow = ""; }
+    else if (selected) {
+      const v = knownVideos.find((k) => k.flow === selected);
+      if (!v) return;
+      videoLabel = v.label; videoFlow = v.flow;
+    } else return;
+    setSaving(true);
+    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, videoFlow, videoLabel }) });
+    setSaving(false); setEditing(false); setSelected(""); setFreeText(""); onRefresh();
+  }
+  async function remove() {
+    setSaving(true);
+    await fetch(`/api/acquisition?attributionEmail=${encodeURIComponent(email)}`, { method: "DELETE" });
+    setSaving(false); setEditing(false); onRefresh();
+  }
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border-color)" }}>
+      {!editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Vidéo attribuée manuellement : <strong style={{ color: "var(--text-primary)" }}>{currentVideo}</strong></span>
+          <button onClick={() => { setEditing(true); setSelected(""); setFreeText(""); }} style={{ fontSize: 11, fontWeight: 600, color: "#3E3680", background: "none", border: "none", textDecoration: "underline", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Changer</button>
+          <button onClick={remove} disabled={saving} style={{ fontSize: 11, fontWeight: 600, color: "#7A3028", background: "none", border: "none", textDecoration: "underline", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>Retirer</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <select value={selected} onChange={(e) => { setSelected(e.target.value); setFreeText(""); }}
+            style={{ padding: "7px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", background: "#FFF" }}>
+            <option value="">— Choisir une vidéo existante —</option>
+            {knownVideos.map((v) => <option key={v.flow} value={v.flow}>{v.label}</option>)}
+          </select>
+          <div style={{ display: "flex", gap: 6 }}>
+            <input value={freeText} onChange={(e) => { setFreeText(e.target.value); setSelected(""); }} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="Nom d'une vidéo (saisie libre)"
+              style={{ flex: 1, padding: "6px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+            <button onClick={save} disabled={saving || (!selected && !freeText.trim())}
+              style={{ padding: "6px 12px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, opacity: (!selected && !freeText.trim()) ? 0.5 : 1 }}>{saving ? "…" : "OK"}</button>
+            <button onClick={() => setEditing(false)} style={{ padding: "6px 10px", background: "none", color: "var(--text-muted)", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>Annuler</button>
           </div>
         </div>
       )}
