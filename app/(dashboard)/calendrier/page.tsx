@@ -101,10 +101,9 @@ function buildDayBuckets(items: TrendRawItem[], from: Date, to: Date): DayBucket
     }
   }
 
-  // On ne garde que les jours ayant au moins un événement (barres vides inutiles)
-  return Array.from(buckets.values())
-    .filter((b) => b.present + b.noshow + b.cancelled > 0)
-    .sort((a, b) => a.day.getTime() - b.day.getTime());
+  // Tous les jours de la période sont conservés (même à zéro) pour lire les vrais
+  // écarts entre les calls et la fréquence réelle, pas seulement les jours actifs.
+  return Array.from(buckets.values()).sort((a, b) => a.day.getTime() - b.day.getTime());
 }
 
 type RangePreset = "month" | "30d" | "3m" | "1y";
@@ -165,7 +164,9 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
 
   // Affiche un label sur l'axe X tous les step jours pour éviter le chevauchement
   const n = buckets.length;
-  const labelStep = n > 24 ? Math.ceil(n / 12) : n > 12 ? 2 : 1;
+  const labelStep = n > 24 ? Math.ceil(n / 16) : n > 12 ? 2 : 1;
+  // Barres plus fines quand il y a beaucoup de jours (ex: 1 an), pour limiter le scroll
+  const barMinWidth = n > 120 ? 6 : n > 45 ? 10 : 14;
 
   return (
     <Panel title="Tendances de l'événement">
@@ -216,7 +217,36 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
           Aucun événement sur cette période.
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, position: "relative" }}>
+          {/* Tooltip fixe (coin haut-droit) — évite le débordement au survol des barres */}
+          {hoveredIdx !== null && buckets[hoveredIdx] && (() => {
+            const b = buckets[hoveredIdx];
+            const total = activeSeries.reduce((sum, s) => sum + b[s.key], 0);
+            if (total === 0) return null;
+            return (
+              <div style={{
+                position: "absolute", top: 0, right: 0, zIndex: 20,
+                background: "#1C1C1E", color: "#FFF", borderRadius: 10, padding: "10px 12px",
+                fontSize: 12, minWidth: 160, boxShadow: "0 8px 32px rgba(0,0,0,0.25)", pointerEvents: "none",
+              }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.8, textTransform: "capitalize" }}>{b.fullLabel}</div>
+                {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
+                  const v = b[s.key];
+                  if (v === 0) return null;
+                  return (
+                    <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{s.label}</span>
+                      <span style={{ fontWeight: 700 }}>{v}</span>
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.15)", opacity: 0.85 }}>
+                  <span>Total</span><span style={{ fontWeight: 700 }}>{total}</span>
+                </div>
+              </div>
+            );
+          })()}
           {/* Axe Y */}
           <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", height: 220, paddingBottom: 28, flexShrink: 0 }}>
             {[...yTicks].reverse().map((v) => (
@@ -226,7 +256,7 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
 
           {/* Zone des barres (scroll horizontal si beaucoup de jours) */}
           <div style={{ flex: 1, overflowX: "auto", position: "relative" }}>
-            <div style={{ position: "relative", minWidth: Math.max(n * 24, 300) }}>
+            <div style={{ position: "relative", minWidth: Math.max(n * (barMinWidth + 4), 300) }}>
               {/* Lignes de grille horizontales */}
               <div style={{ position: "absolute", inset: 0, height: 220, display: "flex", flexDirection: "column", justifyContent: "space-between", pointerEvents: "none" }}>
                 {yTicks.map((v) => (
@@ -237,14 +267,13 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
               {/* Barres */}
               <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 220, position: "relative" }}>
                 {buckets.map((b, i) => {
-                  const total = activeSeries.reduce((sum, s) => sum + b[s.key], 0);
                   const isHovered = hoveredIdx === i;
                   return (
                     <div
                       key={i}
                       onMouseEnter={() => setHoveredIdx(i)}
                       onMouseLeave={() => setHoveredIdx(null)}
-                      style={{ flex: 1, minWidth: 14, maxWidth: 44, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", position: "relative" }}
+                      style={{ flex: 1, minWidth: barMinWidth, maxWidth: 44, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", position: "relative" }}
                     >
                       {/* Segments empilés (du haut vers le bas : annulé, no-show, présent) */}
                       <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%", gap: 2 }}>
@@ -269,43 +298,6 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
                           );
                         })}
                       </div>
-
-                      {/* Tooltip */}
-                      {isHovered && total > 0 && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            bottom: "calc(100% + 6px)",
-                            left: "50%",
-                            transform: "translateX(-50%)",
-                            background: "#1C1C1E",
-                            color: "#FFF",
-                            borderRadius: 10,
-                            padding: "10px 12px",
-                            fontSize: 12,
-                            zIndex: 20,
-                            minWidth: 150,
-                            boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-                            pointerEvents: "none",
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.8, textTransform: "capitalize" }}>{b.fullLabel}</div>
-                          {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
-                            const v = b[s.key];
-                            if (v === 0) return null;
-                            return (
-                              <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
-                                <span style={{ flex: 1 }}>{s.label}</span>
-                                <span style={{ fontWeight: 700 }}>{v}</span>
-                              </div>
-                            );
-                          })}
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.15)", opacity: 0.85 }}>
-                            <span>Total</span><span style={{ fontWeight: 700 }}>{total}</span>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -314,7 +306,7 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
               {/* Labels axe X */}
               <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                 {buckets.map((b, i) => (
-                  <div key={i} style={{ flex: 1, minWidth: 14, maxWidth: 44, textAlign: "center", fontSize: 9, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden" }}>
+                  <div key={i} style={{ flex: 1, minWidth: barMinWidth, maxWidth: 44, textAlign: "center", fontSize: 9, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden" }}>
                     {i % labelStep === 0 ? b.label : ""}
                   </div>
                 ))}
