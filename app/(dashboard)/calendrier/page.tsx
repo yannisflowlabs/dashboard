@@ -51,56 +51,44 @@ interface CalData {
 
 type TrendCategory = "present" | "noshow" | "cancelled";
 
-interface WeekBucket {
-  label: string;
-  weekStart: Date;
+interface DayBucket {
+  label: string;       // libellé court sous la barre
+  fullLabel: string;   // libellé complet (tooltip)
+  day: Date;
   present: number;
   noshow: number;
   cancelled: number;
 }
 
+// Status palette validée (good / warning / critical) — voir dataviz skill.
 const TREND_SERIES: { key: TrendCategory; label: string; color: string }[] = [
-  { key: "present",   label: "Présent",  color: "#4ADE80" },
-  { key: "noshow",    label: "No-show",  color: "#60A5FA" },
-  { key: "cancelled", label: "Annulé",   color: "#F87171" },
+  { key: "present",   label: "Présent",  color: "#0ca30c" },
+  { key: "noshow",    label: "No-show",  color: "#fab219" },
+  { key: "cancelled", label: "Annulé",   color: "#d03b3b" },
 ];
 
-function getMondayOf(d: Date): Date {
-  const day = d.getDay(); // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day;
-  const m = new Date(d);
-  m.setHours(0, 0, 0, 0);
-  m.setDate(d.getDate() + diff);
-  return m;
-}
+function buildDayBuckets(items: TrendRawItem[], from: Date, to: Date): DayBucket[] {
+  const buckets = new Map<string, DayBucket>();
 
-function formatWeekLabel(start: Date): string {
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  const startFmt = start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const endFmt = end.toLocaleDateString("en-US", { day: "numeric" });
-  return `${startFmt} - ${endFmt}`;
-}
-
-function buildWeekBuckets(items: TrendRawItem[], from: Date, to: Date): WeekBucket[] {
-  const buckets = new Map<string, WeekBucket>();
-
-  const cursor = getMondayOf(from);
-  while (cursor <= to) {
+  const cursor = new Date(from);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  while (cursor <= end) {
     const key = cursor.toISOString().slice(0, 10);
     buckets.set(key, {
-      label: formatWeekLabel(new Date(cursor)),
-      weekStart: new Date(cursor),
+      label: cursor.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
+      fullLabel: cursor.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
+      day: new Date(cursor),
       present: 0, noshow: 0, cancelled: 0,
     });
-    cursor.setDate(cursor.getDate() + 7);
+    cursor.setDate(cursor.getDate() + 1);
   }
 
   for (const item of items) {
     const d = new Date(item.start);
     if (d < from || d > to) continue;
-    const monday = getMondayOf(d);
-    const key = monday.toISOString().slice(0, 10);
+    const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
     const bucket = buckets.get(key);
     if (!bucket) continue;
 
@@ -113,7 +101,10 @@ function buildWeekBuckets(items: TrendRawItem[], from: Date, to: Date): WeekBuck
     }
   }
 
-  return Array.from(buckets.values()).sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
+  // On ne garde que les jours ayant au moins un événement (barres vides inutiles)
+  return Array.from(buckets.values())
+    .filter((b) => b.present + b.noshow + b.cancelled > 0)
+    .sort((a, b) => a.day.getTime() - b.day.getTime());
 }
 
 type RangePreset = "month" | "30d" | "3m" | "1y";
@@ -123,7 +114,7 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
   const [visible, setVisible] = useState<Set<TrendCategory>>(
     new Set(["present", "noshow", "cancelled"])
   );
-  const [hovered, setHovered] = useState<{ x: number; y: number; bucket: WeekBucket } | null>(null);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   const { from, to } = useMemo(() => {
     const now = new Date();
@@ -141,17 +132,18 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
     return { from, to };
   }, [rangePreset]);
 
-  const buckets = useMemo(() => buildWeekBuckets(trendRaw, from, to), [trendRaw, from, to]);
+  const buckets = useMemo(() => buildDayBuckets(trendRaw, from, to), [trendRaw, from, to]);
 
-  const maxVal = useMemo(() => {
+  const activeSeries = TREND_SERIES.filter((s) => visible.has(s.key));
+
+  const maxTotal = useMemo(() => {
     let m = 0;
     for (const b of buckets) {
-      for (const s of TREND_SERIES) {
-        if (visible.has(s.key)) m = Math.max(m, b[s.key]);
-      }
+      const total = activeSeries.reduce((sum, s) => sum + b[s.key], 0);
+      m = Math.max(m, total);
     }
     return Math.max(m, 1);
-  }, [buckets, visible]);
+  }, [buckets, activeSeries]);
 
   const toggleSeries = (key: TrendCategory) => {
     setVisible((prev) => {
@@ -162,19 +154,7 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
     });
   };
 
-  // SVG dimensions
-  const W = 900, H = 220;
-  const padL = 36, padR = 16, padT = 16, padB = 40;
-  const chartW = W - padL - padR;
-  const chartH = H - padT - padB;
-  const n = buckets.length;
-  const xStep = n > 1 ? chartW / (n - 1) : chartW;
-
-  const xOf = (i: number) => padL + i * xStep;
-  const yOf = (v: number) => padT + chartH - (v / maxVal) * chartH;
-
-  // Y gridlines
-  const yTicks = [0, Math.round(maxVal / 3), Math.round((maxVal * 2) / 3), maxVal];
+  const yTicks = [0, Math.round(maxTotal / 2), maxTotal];
 
   const presets: { key: RangePreset; label: string }[] = [
     { key: "month", label: "Ce mois" },
@@ -183,9 +163,13 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
     { key: "1y",    label: "1 an" },
   ];
 
+  // Affiche un label sur l'axe X tous les step jours pour éviter le chevauchement
+  const n = buckets.length;
+  const labelStep = n > 24 ? Math.ceil(n / 12) : n > 12 ? 2 : 1;
+
   return (
     <Panel title="Tendances de l'événement">
-      {/* Legend + Range */}
+      {/* Légende + Période */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
           {TREND_SERIES.map((s) => (
@@ -201,7 +185,7 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
               }}
             >
               <span style={{
-                width: 10, height: 10, borderRadius: "50%",
+                width: 10, height: 10, borderRadius: 3,
                 background: s.color, display: "inline-block", flexShrink: 0,
               }} />
               {s.label}
@@ -227,126 +211,121 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
         </div>
       </div>
 
-      {/* SVG Chart */}
-      <div style={{ position: "relative", overflowX: "auto" }}>
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: "100%", height: "auto", minWidth: Math.max(n * 28, 400) }}
-          onMouseLeave={() => setHovered(null)}
-        >
-          {/* Grid */}
-          {yTicks.map((v) => (
-            <g key={v}>
-              <line
-                x1={padL} y1={yOf(v)} x2={W - padR} y2={yOf(v)}
-                stroke="rgba(120,120,150,0.15)" strokeDasharray="4 4"
-              />
-              <text x={padL - 6} y={yOf(v) + 4} fontSize={10} fill="var(--text-muted)" textAnchor="end">
-                {v}
-              </text>
-            </g>
-          ))}
-
-          {/* X axis labels — show every Nth to avoid overlap */}
-          {buckets.map((b, i) => {
-            const step = n > 20 ? Math.ceil(n / 12) : n > 10 ? 2 : 1;
-            if (i % step !== 0) return null;
-            return (
-              <text
-                key={i}
-                x={xOf(i)}
-                y={H - 6}
-                fontSize={9}
-                fill="var(--text-muted)"
-                textAnchor="middle"
-              >
-                {b.label}
-              </text>
-            );
-          })}
-
-          {/* Lines */}
-          {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
-            const points = buckets.map((b, i) => `${xOf(i)},${yOf(b[s.key])}`).join(" ");
-            return (
-              <g key={s.key}>
-                <polyline
-                  points={points}
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth={2}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                />
-                {buckets.map((b, i) => b[s.key] > 0 ? (
-                  <circle
-                    key={i}
-                    cx={xOf(i)} cy={yOf(b[s.key])} r={4}
-                    fill={s.color} stroke="#FFF" strokeWidth={1.5}
-                  />
-                ) : null)}
-              </g>
-            );
-          })}
-
-          {/* Hover zones */}
-          {buckets.map((b, i) => (
-            <rect
-              key={i}
-              x={xOf(i) - xStep / 2}
-              y={padT}
-              width={xStep}
-              height={chartH}
-              fill="transparent"
-              onMouseEnter={(e) => {
-                const rect = (e.currentTarget.closest("svg") as SVGSVGElement).getBoundingClientRect();
-                setHovered({
-                  x: xOf(i) / W * rect.width + rect.left,
-                  y: rect.top,
-                  bucket: b,
-                });
-              }}
-            />
-          ))}
-        </svg>
-
-        {/* Tooltip */}
-        {hovered && (
-          <div
-            style={{
-              position: "fixed",
-              left: hovered.x + 12,
-              top: hovered.y + 20,
-              background: "#1C1C1E",
-              color: "#FFF",
-              borderRadius: 10,
-              padding: "10px 14px",
-              fontSize: 12,
-              zIndex: 100,
-              pointerEvents: "none",
-              minWidth: 160,
-              boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-            }}
-          >
-            <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.7 }}>{hovered.bucket.label}</div>
-            {TREND_SERIES.map((s) => {
-              const v = hovered.bucket[s.key];
-              if (v === 0) return null;
-              return (
-                <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />
-                  <span style={{ flex: 1 }}>{s.label}</span>
-                  <span style={{ fontWeight: 700 }}>{v}</span>
-                </div>
-              );
-            })}
+      {buckets.length === 0 ? (
+        <div style={{ padding: "48px 0", textAlign: "center", fontSize: 13, color: "var(--text-muted)" }}>
+          Aucun événement sur cette période.
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          {/* Axe Y */}
+          <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", height: 220, paddingBottom: 28, flexShrink: 0 }}>
+            {[...yTicks].reverse().map((v) => (
+              <span key={v} style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1 }}>{v}</span>
+            ))}
           </div>
-        )}
-      </div>
 
-      {/* X axis label */}
-      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-        Heure de début de réservation
+          {/* Zone des barres (scroll horizontal si beaucoup de jours) */}
+          <div style={{ flex: 1, overflowX: "auto", position: "relative" }}>
+            <div style={{ position: "relative", minWidth: Math.max(n * 24, 300) }}>
+              {/* Lignes de grille horizontales */}
+              <div style={{ position: "absolute", inset: 0, height: 220, display: "flex", flexDirection: "column", justifyContent: "space-between", pointerEvents: "none" }}>
+                {yTicks.map((v) => (
+                  <div key={v} style={{ borderTop: "1px dashed rgba(120,120,150,0.15)", height: 0 }} />
+                ))}
+              </div>
+
+              {/* Barres */}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 220, position: "relative" }}>
+                {buckets.map((b, i) => {
+                  const total = activeSeries.reduce((sum, s) => sum + b[s.key], 0);
+                  const isHovered = hoveredIdx === i;
+                  return (
+                    <div
+                      key={i}
+                      onMouseEnter={() => setHoveredIdx(i)}
+                      onMouseLeave={() => setHoveredIdx(null)}
+                      style={{ flex: 1, minWidth: 14, maxWidth: 44, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", cursor: "pointer", position: "relative" }}
+                    >
+                      {/* Segments empilés (du haut vers le bas : annulé, no-show, présent) */}
+                      <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%", gap: 2 }}>
+                        {[...activeSeries].reverse().map((s) => {
+                          const val = b[s.key];
+                          if (val === 0) return null;
+                          const h = (val / maxTotal) * 100;
+                          return (
+                            <div
+                              key={s.key}
+                              title={`${s.label}: ${val}`}
+                              style={{
+                                height: `${h}%`,
+                                background: s.color,
+                                borderRadius: 3,
+                                minHeight: 3,
+                                opacity: isHovered ? 1 : 0.9,
+                                boxShadow: isHovered ? `0 0 0 1.5px var(--surface, #FFF)` : "none",
+                                transition: "opacity 0.15s",
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+
+                      {/* Tooltip */}
+                      {isHovered && total > 0 && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: "calc(100% + 6px)",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            background: "#1C1C1E",
+                            color: "#FFF",
+                            borderRadius: 10,
+                            padding: "10px 12px",
+                            fontSize: 12,
+                            zIndex: 20,
+                            minWidth: 150,
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.8, textTransform: "capitalize" }}>{b.fullLabel}</div>
+                          {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
+                            const v = b[s.key];
+                            if (v === 0) return null;
+                            return (
+                              <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
+                                <span style={{ flex: 1 }}>{s.label}</span>
+                                <span style={{ fontWeight: 700 }}>{v}</span>
+                              </div>
+                            );
+                          })}
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.15)", opacity: 0.85 }}>
+                            <span>Total</span><span style={{ fontWeight: 700 }}>{total}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Labels axe X */}
+              <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                {buckets.map((b, i) => (
+                  <div key={i} style={{ flex: 1, minWidth: 14, maxWidth: 44, textAlign: "center", fontSize: 9, color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden" }}>
+                    {i % labelStep === 0 ? b.label : ""}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ textAlign: "center", fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+        Répartition des calls par jour
       </div>
     </Panel>
   );
