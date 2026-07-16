@@ -38,6 +38,7 @@ interface FollowUp { key: string; handle: string | null; name: string | null; em
 interface PrevAgg { funnel: Record<string, number>; totalPeople: number; clients: number; calls: number; individualsCount: number; }
 interface ToAttribute { email: string; name: string | null; stage: string; callBookedAt: string | null; }
 interface KnownVideo { flow: string; label: string; }
+interface SearchableJourney { handle: string | null; name: string | null; firstVideo: string | null; stage: string; }
 interface AcqData {
   journeys: Journey[];
   funnel: Record<string, number>;
@@ -51,13 +52,14 @@ interface AcqData {
   toFollowUp: FollowUp[];
   toAttribute: ToAttribute[];
   knownVideos: KnownVideo[];
+  searchableJourneys: SearchableJourney[];
   range: { from: string; to: string } | null;
   updatedAt: string;
 }
 
 const TOP_VIDEOS = 10;
 const TOP_JOURNEYS = 20;
-const FUNNEL_ORDER = ["comment", "dm", "subscribed", "email_captured", "guide_sent", "company", "call_booked", "client"];
+const FUNNEL_ORDER = ["comment", "dm", "subscribed", "guide_sent", "company", "call_booked", "client"];
 
 const STAGE_LABELS: Record<string, string> = {
   comment: "Commentaire", dm: "DM", subscribed: "Abonné Insta",
@@ -210,9 +212,9 @@ export default function AcquisitionPage() {
         <ManualLinkPanel unlinked={data.unlinked} onLinked={load} />
       </div>
 
-      {/* Calls à rattacher à une vidéo */}
+      {/* Calls à rattacher (parcours ManyChat ou vidéo) */}
       {data.toAttribute.length > 0 && (
-        <AttributeVideoPanel items={data.toAttribute} knownVideos={data.knownVideos} onAttributed={load} />
+        <AttributeVideoPanel items={data.toAttribute} knownVideos={data.knownVideos} searchableJourneys={data.searchableJourneys} onAttributed={load} />
       )}
 
       {/* Parcours nominatifs — 20 derniers */}
@@ -597,78 +599,132 @@ function ManualLinkPanel({ unlinked, onLinked }: { unlinked: Unlinked[]; onLinke
 }
 
 // Panneau : rattacher un call "origine inconnue" à une vidéo
-function AttributeVideoPanel({ items, knownVideos, onAttributed }: { items: ToAttribute[]; knownVideos: KnownVideo[]; onAttributed: () => void }) {
+function AttributeVideoPanel({ items, knownVideos, searchableJourneys, onAttributed }: { items: ToAttribute[]; knownVideos: KnownVideo[]; searchableJourneys: SearchableJourney[]; onAttributed: () => void }) {
   const [active, setActive] = useState<string | null>(null);
-  const [selected, setSelected] = useState("");   // flow choisi dans la liste
-  const [freeText, setFreeText] = useState("");    // saisie libre
-  const [saving, setSaving] = useState(false);
-
-  async function attribute(email: string) {
-    // Priorité à la saisie libre si remplie, sinon la sélection
-    let videoLabel = "", videoFlow = "";
-    if (freeText.trim()) {
-      videoLabel = freeText.trim();
-      videoFlow = ""; // le backend dérivera le flow depuis le label
-    } else if (selected) {
-      const v = knownVideos.find((k) => k.flow === selected);
-      if (!v) return;
-      videoLabel = v.label; videoFlow = v.flow;
-    } else return;
-
-    setSaving(true);
-    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, videoFlow, videoLabel }) });
-    setSaving(false); setActive(null); setSelected(""); setFreeText(""); onAttributed();
-  }
 
   return (
-    <Panel title="Calls à rattacher à une vidéo" padding="20px" style={{ marginBottom: 18 }}>
+    <Panel title="Calls à rattacher" padding="20px" style={{ marginBottom: 18 }}>
       <div style={{ padding: "12px 20px 4px" }}>
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
-          Ces calls sont arrivés sans parcours ManyChat (ancien DM, email non capturé). Attribue-leur une vidéo source pour reconstruire leur parcours complet et créditer la bonne vidéo.
+          Ces calls sont arrivés sans parcours ManyChat. Relie-les au bon parcours (recherche par @handle) pour reconstruire leur historique complet. Si tu ne trouves pas la personne, attribue-lui simplement une vidéo source.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {items.map((it) => (
-            <div key={it.email} style={{ border: "1px solid var(--border-color)", borderRadius: 8, padding: "8px 10px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{cleanName(it.name) ?? it.email}</div>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{it.email} · {STAGE_LABELS[it.stage] ?? it.stage}{it.callBookedAt ? ` · call ${fmtDate(it.callBookedAt)}` : ""}</div>
-                </div>
-                {active !== it.email && (
-                  <button onClick={() => { setActive(it.email); setSelected(""); setFreeText(""); }}
-                    style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "#2E5E28", background: "rgba(168,197,160,0.15)", border: "1px solid rgba(168,197,160,0.4)", borderRadius: 6, padding: "5px 9px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-                    <Play size={11} /> Attribuer une vidéo
-                  </button>
-                )}
-              </div>
-              {active === it.email && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-                  <select value={selected} onChange={(e) => { setSelected(e.target.value); setFreeText(""); }}
-                    style={{ padding: "7px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", background: "#FFF" }}>
-                    <option value="">— Choisir une vidéo existante —</option>
-                    {knownVideos.map((v) => <option key={v.flow} value={v.flow}>{v.label}</option>)}
-                  </select>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: "var(--text-muted)" }}>
-                    <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} /> ou saisir un nom <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} />
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input value={freeText} onChange={(e) => { setFreeText(e.target.value); setSelected(""); }} onKeyDown={(e) => e.key === "Enter" && attribute(it.email)} placeholder="Nom d'une vidéo (saisie libre)"
-                      style={{ flex: 1, padding: "6px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                    <button onClick={() => attribute(it.email)} disabled={saving || (!selected && !freeText.trim())}
-                      style={{ padding: "6px 12px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, opacity: (!selected && !freeText.trim()) ? 0.5 : 1 }}>
-                      {saving ? "…" : "OK"}
-                    </button>
-                    <button onClick={() => setActive(null)}
-                      style={{ padding: "6px 10px", background: "none", color: "var(--text-muted)", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-                      Annuler
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <RattachRow key={it.email} it={it} knownVideos={knownVideos} searchableJourneys={searchableJourneys}
+              isActive={active === it.email} onOpen={() => setActive(it.email)} onClose={() => setActive(null)} onDone={() => { setActive(null); onAttributed(); }} />
           ))}
         </div>
       </div>
     </Panel>
+  );
+}
+
+function RattachRow({ it, knownVideos, searchableJourneys, isActive, onOpen, onClose, onDone }: {
+  it: ToAttribute; knownVideos: KnownVideo[]; searchableJourneys: SearchableJourney[];
+  isActive: boolean; onOpen: () => void; onClose: () => void; onDone: () => void;
+}) {
+  const [mode, setMode] = useState<"journey" | "video">("journey");
+  const [handleSearch, setHandleSearch] = useState("");
+  const [selectedVideo, setSelectedVideo] = useState("");
+  const [freeText, setFreeText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const matches = useMemo(() => {
+    const term = handleSearch.trim().toLowerCase().replace(/^@/, "");
+    if (!term) return [];
+    return searchableJourneys
+      .filter((j) => (j.handle ?? "").toLowerCase().includes(term) || (cleanName(j.name) ?? "").toLowerCase().includes(term))
+      .slice(0, 6);
+  }, [handleSearch, searchableJourneys]);
+
+  async function linkToJourney(handle: string) {
+    setSaving(true);
+    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: it.email, linkHandle: handle }) });
+    setSaving(false); onDone();
+  }
+  async function attributeVideo() {
+    let videoLabel = "", videoFlow = "";
+    if (freeText.trim()) { videoLabel = freeText.trim(); videoFlow = ""; }
+    else if (selectedVideo) {
+      const v = knownVideos.find((k) => k.flow === selectedVideo);
+      if (!v) return;
+      videoLabel = v.label; videoFlow = v.flow;
+    } else return;
+    setSaving(true);
+    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: it.email, videoFlow, videoLabel }) });
+    setSaving(false); onDone();
+  }
+
+  const tab = (m: "journey" | "video", label: string): React.CSSProperties => ({
+    fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+    border: `1px solid ${mode === m ? "var(--text-primary)" : "var(--border-color)"}`,
+    background: mode === m ? "var(--text-primary)" : "#FFF", color: mode === m ? "#FFF" : "var(--text-muted)",
+  });
+
+  return (
+    <div style={{ border: "1px solid var(--border-color)", borderRadius: 8, padding: "8px 10px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{cleanName(it.name) ?? it.email}</div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>{it.email} · {STAGE_LABELS[it.stage] ?? it.stage}{it.callBookedAt ? ` · call ${fmtDate(it.callBookedAt)}` : ""}</div>
+        </div>
+        {!isActive && (
+          <button onClick={() => { onOpen(); setMode("journey"); setHandleSearch(""); setSelectedVideo(""); setFreeText(""); }}
+            style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "#3E3680", background: "rgba(184,176,232,0.15)", border: "1px solid rgba(184,176,232,0.4)", borderRadius: 6, padding: "5px 9px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+            <Link2 size={11} /> Rattacher
+          </button>
+        )}
+      </div>
+      {isActive && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => setMode("journey")} style={tab("journey", "")}>Relier à un parcours</button>
+            <button onClick={() => setMode("video")} style={tab("video", "")}>Attribuer une vidéo</button>
+            <span style={{ flex: 1 }} />
+            <button onClick={onClose} style={{ fontSize: 11, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>Annuler</button>
+          </div>
+
+          {mode === "journey" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ position: "relative" }}>
+                <Search size={13} style={{ position: "absolute", left: 9, top: 8, color: "var(--text-muted)" }} />
+                <input value={handleSearch} onChange={(e) => setHandleSearch(e.target.value)} autoFocus placeholder="Rechercher un @handle ou un nom…"
+                  style={{ width: "100%", padding: "6px 9px 6px 28px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              {handleSearch.trim() && matches.length === 0 && <div style={{ fontSize: 11, color: "var(--text-muted)", padding: "4px 2px" }}>Aucun parcours trouvé. Essaie l&apos;onglet « Attribuer une vidéo ».</div>}
+              {matches.map((m) => (
+                <button key={m.handle} onClick={() => m.handle && linkToJourney(m.handle)} disabled={saving}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "7px 10px", border: "1px solid var(--border-color)", borderRadius: 7, background: "#FFF", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{cleanName(m.name) ?? `@${m.handle}`}</span>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)", marginLeft: 6 }}>@{m.handle}{m.firstVideo ? ` · ${m.firstVideo}` : ""}</span>
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#3E3680", flexShrink: 0 }}>Relier →</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <select value={selectedVideo} onChange={(e) => { setSelectedVideo(e.target.value); setFreeText(""); }}
+                style={{ padding: "7px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none", background: "#FFF" }}>
+                <option value="">— Choisir une vidéo existante —</option>
+                {knownVideos.map((v) => <option key={v.flow} value={v.flow}>{v.label}</option>)}
+              </select>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: "var(--text-muted)" }}>
+                <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} /> ou saisir un nom <span style={{ flex: 1, height: 1, background: "var(--border-color)" }} />
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={freeText} onChange={(e) => { setFreeText(e.target.value); setSelectedVideo(""); }} onKeyDown={(e) => e.key === "Enter" && attributeVideo()} placeholder="Nom d'une vidéo (saisie libre)"
+                  style={{ flex: 1, padding: "6px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                <button onClick={attributeVideo} disabled={saving || (!selectedVideo && !freeText.trim())}
+                  style={{ padding: "6px 12px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, opacity: (!selectedVideo && !freeText.trim()) ? 0.5 : 1 }}>
+                  {saving ? "…" : "OK"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

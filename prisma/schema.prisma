@@ -86,6 +86,17 @@ model ManualVideoAttribution {
   createdAt  DateTime @default(now())
 }
 
+// Acquisition : liaison manuelle d'un call Cal.com à un parcours ManyChat existant.
+// Remplace le pont automatique par email (abandonné car trop de faux emails).
+// email = prospect Cal.com, handle = parcours ManyChat auquel on le rattache.
+model CallJourneyLink {
+  email     String   @id // email Cal.com / prospect
+  handle    String   // @ Instagram du parcours ManyChat cible
+  createdAt DateTime @default(now())
+
+  @@index([handle])
+}
+
 model ManualMetric {
   key       String   @id // ex: "reelsViews"
   value     Int      @default(0)

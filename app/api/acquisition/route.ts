@@ -4,7 +4,9 @@ import { getPrisma } from "@/lib/prisma";
 
 // Étapes de l'entonnoir principal, dans l'ordre (cumulatif).
 // "individual" (particulier) n'est PAS dans l'entonnoir : c'est une sortie qualifiée après le guide.
-const STAGE_ORDER = ["comment", "dm", "subscribed", "email_captured", "guide_sent", "company", "call_booked", "call_done", "client"] as const;
+// L'email n'est plus une étape : trop de faux emails créaient du faux drop-off. Les calls
+// se relient à un parcours manuellement (par handle) ou reçoivent juste une vidéo attribuée.
+const STAGE_ORDER = ["comment", "dm", "subscribed", "guide_sent", "company", "call_booked", "call_done", "client"] as const;
 type Stage = (typeof STAGE_ORDER)[number];
 
 // Segment de qualification
@@ -37,7 +39,7 @@ function daysBetween(a: string | Date, b: string | Date): number {
 // Calcule les agrégats (funnel, vidéos, délais) pour un ensemble de parcours.
 function computeAggregates(journeys: Journey[]) {
   const funnel: Record<Stage, number> = {
-    comment: 0, dm: 0, subscribed: 0, email_captured: 0, guide_sent: 0, company: 0, call_booked: 0, call_done: 0, client: 0,
+    comment: 0, dm: 0, subscribed: 0, guide_sent: 0, company: 0, call_booked: 0, call_done: 0, client: 0,
   };
   const companyIdx = STAGE_ORDER.indexOf("company");
   const callBookedIdx = STAGE_ORDER.indexOf("call_booked");
@@ -92,42 +94,29 @@ export async function GET(req: NextRequest) {
       prisma.clientBusinessInfo.findMany({ select: { clientEmail: true, dealAmount: true } }),
     ]);
 
-    const videoAttributions = await prisma.manualVideoAttribution.findMany();
+    const [videoAttributions, callLinks] = await Promise.all([
+      prisma.manualVideoAttribution.findMany(),
+      prisma.callJourneyLink.findMany(),
+    ]);
     const attributionByEmail = new Map(videoAttributions.map((a) => [a.email.toLowerCase(), a]));
 
-    // handle → email (liens manuels)
-    const handleToEmail = new Map(links.map((l) => [l.handle.toLowerCase(), l.email.toLowerCase()]));
+    // Liaison manuelle call → parcours : handle ManyChat → email du prospect Cal.com
+    const handleToLinkedCall = new Map(callLinks.map((l) => [l.handle.toLowerCase(), l.email.toLowerCase()]));
+
+    void links; // anciens AcquisitionLink (handle→email) : plus utilisés depuis l'abandon du pont email
     // email → prospect
     const prospectByEmail = new Map(prospects.map((p) => [p.email.toLowerCase(), p]));
     const dealByEmail = new Map(businessInfos.map((b) => [b.clientEmail.toLowerCase(), b.dealAmount]));
 
-    // Regroupe les événements par identité. Le handle ManyChat est la clé stable
-    // (une même personne peut changer/corriger son email en cours de route) :
-    // on fusionne d'abord par handle, puis on rattache l'email le plus récent connu.
-    // Si un événement n'a pas de handle (ex: lien manuel côté email seul), on retombe sur l'email.
-    const handleGroups = new Map<string, typeof events>();
-    const emailOnlyGroups = new Map<string, typeof events>();
+    // Regroupe les événements par HANDLE uniquement (clé stable ManyChat).
+    // L'email n'est plus une clé de regroupement (trop de faux emails).
+    // Les événements sans handle sont ignorés (inexploitables pour un parcours nominatif).
+    const groups = new Map<string, typeof events>();
     for (const e of events) {
       const handleKey = e.handle?.toLowerCase() ?? null;
-      const emailKey = e.email?.toLowerCase() ?? null;
-      if (handleKey) {
-        if (!handleGroups.has(handleKey)) handleGroups.set(handleKey, []);
-        handleGroups.get(handleKey)!.push(e);
-      } else if (emailKey) {
-        if (!emailOnlyGroups.has(emailKey)) emailOnlyGroups.set(emailKey, []);
-        emailOnlyGroups.get(emailKey)!.push(e);
-      }
-    }
-    const groups = new Map<string, typeof events>();
-    for (const [handleKey, evs] of handleGroups) groups.set(handleKey, evs);
-    for (const [emailKey, evs] of emailOnlyGroups) {
-      // Si cet email correspond à un handle déjà regroupé (via lien manuel), on fusionne dedans
-      const linkedHandle = [...handleToEmail.entries()].find(([, em]) => em === emailKey)?.[0];
-      if (linkedHandle && groups.has(linkedHandle)) {
-        groups.get(linkedHandle)!.push(...evs);
-      } else {
-        groups.set(emailKey, evs);
-      }
+      if (!handleKey) continue;
+      if (!groups.has(handleKey)) groups.set(handleKey, []);
+      groups.get(handleKey)!.push(e);
     }
 
     const journeys: Journey[] = [];
@@ -136,16 +125,17 @@ export async function GET(req: NextRequest) {
       const sorted = evs.slice().sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
       const first = sorted[0];
 
-      // Résout l'identité consolidée. On prend le DERNIER email/nom connu (le plus
-      // récent) : si la personne corrige son email en cours de route, on garde le bon.
+      // Résout l'identité consolidée. On garde l'email (dernier connu) uniquement à
+      // titre informatif ; il ne sert PLUS de pont automatique vers Cal.com (trop de
+      // faux emails). La liaison call↔parcours se fait manuellement par handle.
       const handle = sorted.find((e) => e.handle)?.handle ?? null;
       const name = [...sorted].reverse().find((e) => e.name)?.name ?? null;
-      const directEmail = [...sorted].reverse().find((e) => e.email)?.email?.toLowerCase() ?? null;
-      const linkedEmail = handle ? handleToEmail.get(handle.toLowerCase()) ?? null : null;
-      const email = directEmail ?? linkedEmail ?? null;
-      const linkedManually = !directEmail && !!linkedEmail;
+      const email = [...sorted].reverse().find((e) => e.email)?.email?.toLowerCase() ?? null;
+      const linkedManually = false;
 
-      const prospect = email ? prospectByEmail.get(email) ?? null : null;
+      // Prospect Cal.com relié MANUELLEMENT à ce handle (call → parcours)
+      const linkedProspectEmail = handle ? handleToLinkedCall.get(handle.toLowerCase()) ?? null : null;
+      const prospect = linkedProspectEmail ? prospectByEmail.get(linkedProspectEmail) ?? null : null;
 
       // Détermine le stage atteint (on avance au plus loin franchi)
       const types = new Set(sorted.map((e) => e.eventType));
@@ -153,7 +143,6 @@ export async function GET(req: NextRequest) {
       if (types.has("comment")) stage = "comment";
       if (types.has("dm")) stage = "dm";
       if (types.has("subscribed")) stage = "subscribed";
-      if (types.has("email_captured") || email) stage = "email_captured";
       if (types.has("guide_sent")) stage = "guide_sent";
 
       // Segment de qualification : entreprise fait avancer, particulier = sortie
@@ -166,7 +155,7 @@ export async function GET(req: NextRequest) {
       if (prospect) {
         if (["call_booked", "call_done", "proposal_sent", "client"].includes(prospect.stage)) {
           stage = "call_booked";
-          if (segment !== "individual") segment = "company"; // un call implique une cible entreprise
+          if (segment !== "individual") segment = "company";
           callBookedAt = (prospect.stageUpdatedAt ?? prospect.createdAt)?.toISOString() ?? null;
         }
         if (["call_done", "proposal_sent", "client"].includes(prospect.stage)) stage = "call_done";
@@ -194,9 +183,11 @@ export async function GET(req: NextRequest) {
         stage,
         segment,
         daysToCall: daysToCall !== null && daysToCall >= 0 ? daysToCall : null,
-        dealAmount: email ? dealByEmail.get(email) ?? null : null,
+        dealAmount: linkedProspectEmail ? dealByEmail.get(linkedProspectEmail) ?? null : null,
       });
-      if (email) coveredEmails.add(email);
+      // Seul un prospect relié MANUELLEMENT est considéré comme couvert
+      // (pour ne pas le ré-afficher comme orphelin plus bas).
+      if (linkedProspectEmail) coveredEmails.add(linkedProspectEmail);
     }
 
     // Prospects Cal.com orphelins : ils ont réservé un call / sont clients mais n'ont
@@ -314,7 +305,7 @@ export async function GET(req: NextRequest) {
     // Personnes non reliées (handle sans email) → candidates au lien manuel
     const unlinked = current.filter((j) => !j.email && j.handle).map((j) => ({ key: j.key, handle: j.handle, name: j.name, firstVideo: j.firstVideo }));
 
-    // Calls "origine inconnue" → candidats à l'attribution manuelle d'une vidéo
+    // Calls "origine inconnue" → candidats à la liaison (parcours ManyChat) ou attribution vidéo
     const toAttribute = current
       .filter((j) => j.unknownOrigin && j.email)
       .map((j) => ({ email: j.email, name: j.name, stage: j.stage, callBookedAt: j.callBookedAt }));
@@ -326,6 +317,11 @@ export async function GET(req: NextRequest) {
         return { flow, label: ev?.videoLabel ?? flow };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
+
+    // Parcours ManyChat cherchables (pour relier un call à un parcours par handle)
+    const searchableJourneys = journeys
+      .filter((j) => j.handle)
+      .map((j) => ({ handle: j.handle, name: j.name, firstVideo: j.firstVideo, stage: j.stage }));
 
     return NextResponse.json({
       journeys: current,
@@ -342,6 +338,7 @@ export async function GET(req: NextRequest) {
       unlinked,
       toAttribute,
       knownVideos,
+      searchableJourneys,
       range: (rangeStart !== null && rangeEnd !== null) ? { from: fromParam, to: toParam } : null,
       updatedAt: new Date().toISOString(),
     });
@@ -357,6 +354,23 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // Liaison d'un call à un parcours ManyChat existant : { email, linkHandle }
+    if (body.linkHandle !== undefined) {
+      const email = (body.email as string | undefined)?.trim().toLowerCase();
+      const handle = (body.linkHandle as string | undefined)?.trim().replace(/^@/, "").toLowerCase();
+      if (!email || !handle) {
+        return NextResponse.json({ error: "email et handle requis" }, { status: 400 });
+      }
+      const link = await getPrisma().callJourneyLink.upsert({
+        where: { email },
+        update: { handle },
+        create: { email, handle },
+      });
+      // Une liaison explicite remplace une éventuelle attribution vidéo (redondante)
+      await getPrisma().manualVideoAttribution.deleteMany({ where: { email } });
+      return NextResponse.json({ ok: true, link });
+    }
 
     // Attribution d'une vidéo
     if (body.videoFlow !== undefined || body.videoLabel !== undefined) {
@@ -398,6 +412,11 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const url = new URL(req.url);
+    const callLinkEmail = url.searchParams.get("callLinkEmail")?.trim().toLowerCase();
+    if (callLinkEmail) {
+      await getPrisma().callJourneyLink.delete({ where: { email: callLinkEmail } });
+      return NextResponse.json({ ok: true });
+    }
     const attributionEmail = url.searchParams.get("attributionEmail")?.trim().toLowerCase();
     if (attributionEmail) {
       await getPrisma().manualVideoAttribution.delete({ where: { email: attributionEmail } });
