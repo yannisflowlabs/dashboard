@@ -145,16 +145,22 @@ export async function GET() {
       return d >= startOfMonth;
     });
 
+    // Nom de l'attendee, pour l'afficher dans le tooltip du graphique de tendances
+    const attendeeName = (b: Record<string, unknown>): string | undefined => {
+      const attendees = (b.attendees as { name: string }[]) ?? [];
+      return attendees[0]?.name;
+    };
+
     // Données brutes pour le graphique de tendances (toutes les semaines)
-    const trendRaw: { start: string; status: string; reviewStatus?: string }[] = [
-      ...upcoming.map((b) => ({ start: b.start as string, status: "upcoming" })),
+    const trendRaw: { start: string; status: string; reviewStatus?: string; name?: string }[] = [
+      ...upcoming.map((b) => ({ start: b.start as string, status: "upcoming", name: attendeeName(b) })),
       ...past.map((b) => {
         const id = b.id as number;
         const rev = reviewMap.get(id);
-        return { start: b.start as string, status: "past", reviewStatus: rev };
+        return { start: b.start as string, status: "past", reviewStatus: rev, name: attendeeName(b) };
       }),
-      ...cancelled.map((b) => ({ start: b.start as string, status: "cancelled" })),
-      ...rejected.map((b) => ({ start: b.start as string, status: "rejected" })),
+      ...cancelled.map((b) => ({ start: b.start as string, status: "cancelled", name: attendeeName(b) })),
+      ...rejected.map((b) => ({ start: b.start as string, status: "rejected", name: attendeeName(b) })),
     ];
 
     return NextResponse.json({

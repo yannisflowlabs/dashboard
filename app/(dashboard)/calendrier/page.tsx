@@ -36,6 +36,7 @@ interface TrendRawItem {
   start: string;
   status: "upcoming" | "past" | "cancelled" | "rejected";
   reviewStatus?: string;
+  name?: string;
 }
 
 interface CalData {
@@ -58,6 +59,7 @@ interface DayBucket {
   present: number;
   noshow: number;
   cancelled: number;
+  names: Record<TrendCategory, string[]>; // noms des attendees par catégorie, pour le tooltip
 }
 
 // Status palette validée (good / warning / critical) — voir dataviz skill.
@@ -81,6 +83,7 @@ function buildDayBuckets(items: TrendRawItem[], from: Date, to: Date): DayBucket
       fullLabel: cursor.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }),
       day: new Date(cursor),
       present: 0, noshow: 0, cancelled: 0,
+      names: { present: [], noshow: [], cancelled: [] },
     });
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -92,12 +95,13 @@ function buildDayBuckets(items: TrendRawItem[], from: Date, to: Date): DayBucket
     const bucket = buckets.get(key);
     if (!bucket) continue;
 
+    const name = item.name?.trim() || "Sans nom";
     if (item.status === "past") {
-      if (item.reviewStatus === "noshow") bucket.noshow++;
-      else if (item.reviewStatus === "cancelled") bucket.cancelled++;
-      else bucket.present++;
+      if (item.reviewStatus === "noshow") { bucket.noshow++; bucket.names.noshow.push(name); }
+      else if (item.reviewStatus === "cancelled") { bucket.cancelled++; bucket.names.cancelled.push(name); }
+      else { bucket.present++; bucket.names.present.push(name); }
     } else if (item.status === "cancelled" || item.status === "rejected") {
-      bucket.cancelled++;
+      bucket.cancelled++; bucket.names.cancelled.push(name);
     }
   }
 
@@ -227,17 +231,23 @@ function TrendChart({ trendRaw }: { trendRaw: TrendRawItem[] }) {
               <div style={{
                 position: "absolute", top: 0, right: 0, zIndex: 20,
                 background: "#1C1C1E", color: "#FFF", borderRadius: 10, padding: "10px 12px",
-                fontSize: 12, minWidth: 160, boxShadow: "0 8px 32px rgba(0,0,0,0.25)", pointerEvents: "none",
+                fontSize: 12, minWidth: 200, maxWidth: 260, maxHeight: 260, overflowY: "auto",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.25)", pointerEvents: "none",
               }}>
                 <div style={{ fontWeight: 700, marginBottom: 8, opacity: 0.8, textTransform: "capitalize" }}>{b.fullLabel}</div>
                 {TREND_SERIES.filter((s) => visible.has(s.key)).map((s) => {
                   const v = b[s.key];
                   if (v === 0) return null;
                   return (
-                    <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
-                      <span style={{ flex: 1 }}>{s.label}</span>
-                      <span style={{ fontWeight: 700 }}>{v}</span>
+                    <div key={s.key} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block", flexShrink: 0 }} />
+                        <span style={{ flex: 1 }}>{s.label}</span>
+                        <span style={{ fontWeight: 700 }}>{v}</span>
+                      </div>
+                      <div style={{ marginTop: 3, paddingLeft: 16, opacity: 0.75, fontSize: 11, lineHeight: 1.5 }}>
+                        {b.names[s.key].join(", ")}
+                      </div>
                     </div>
                   );
                 })}
