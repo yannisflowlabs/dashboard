@@ -33,7 +33,6 @@ interface Journey {
   attributedManually?: boolean;
 }
 interface VideoPerf { flow: string; label: string; people: number; companies: number; calls: number; clients: number; revenue: number; }
-interface Unlinked { key: string; handle: string | null; name: string | null; firstVideo: string | null; }
 interface FollowUp { key: string; handle: string | null; name: string | null; email: string | null; stage: string; firstVideo: string | null; daysSinceLastEvent: number; }
 interface PrevAgg { funnel: Record<string, number>; totalPeople: number; clients: number; calls: number; individualsCount: number; }
 interface ToAttribute { email: string; name: string | null; stage: string; callBookedAt: string | null; }
@@ -45,7 +44,6 @@ interface AcqData {
   individualsCount: number;
   videos: VideoPerf[];
   avgDaysToCall: number | null;
-  unlinked: Unlinked[];
   totalPeople: number;
   previous: PrevAgg | null;
   previousRange: { from: string; to: string } | null;
@@ -208,14 +206,9 @@ export default function AcquisitionPage() {
           </div>
         </Panel>
 
-        {/* Liens manuels à faire */}
-        <ManualLinkPanel unlinked={data.unlinked} onLinked={load} />
-      </div>
-
-      {/* Calls à rattacher (parcours ManyChat ou vidéo) */}
-      {data.toAttribute.length > 0 && (
+        {/* Calls à rattacher (parcours ManyChat ou vidéo) */}
         <AttributeVideoPanel items={data.toAttribute} knownVideos={data.knownVideos} searchableJourneys={data.searchableJourneys} onAttributed={load} />
-      )}
+      </div>
 
       {/* Parcours nominatifs — 20 derniers */}
       <Panel title={`Parcours${data.journeys.length > TOP_JOURNEYS ? ` (${TOP_JOURNEYS} derniers sur ${data.journeys.length})` : ` (${data.journeys.length})`}`} padding="20px"
@@ -539,72 +532,19 @@ function TimelinePoint({ icon, label, date, last }: { icon: React.ReactNode; lab
   );
 }
 
-function ManualLinkPanel({ unlinked, onLinked }: { unlinked: Unlinked[]; onLinked: () => void }) {
-  const [active, setActive] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function link(handle: string) {
-    if (!email.trim()) return;
-    setSaving(true);
-    await fetch("/api/acquisition", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ handle, email }) });
-    setSaving(false); setActive(null); setEmail(""); onLinked();
-  }
-
-  return (
-    <Panel title="À relier manuellement" padding="20px">
-      <div style={{ padding: "12px 20px 4px" }}>
-        {unlinked.length === 0 ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#2E5E28" }}>
-            <Check size={14} /> Tout le monde est relié — rien à faire.
-          </div>
-        ) : (
-          <>
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
-              Ces personnes sont arrivées sans email. Relie-les à leur email Cal.com pour compléter leur parcours.
-            </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {unlinked.map((u) => (
-                <div key={u.key} style={{ border: "1px solid var(--border-color)", borderRadius: 8, padding: "8px 10px" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>{u.name ?? `@${u.handle}`}</div>
-                      <div style={{ fontSize: 10, color: "var(--text-muted)" }}>@{u.handle} · {u.firstVideo ?? "—"}</div>
-                    </div>
-                    {active !== u.handle && (
-                      <button onClick={() => { setActive(u.handle); setEmail(""); }}
-                        style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: "#3E3680", background: "rgba(184,176,232,0.15)", border: "1px solid rgba(184,176,232,0.4)", borderRadius: 6, padding: "5px 9px", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-                        <Link2 size={11} /> Relier
-                      </button>
-                    )}
-                  </div>
-                  {active === u.handle && (
-                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                      <input value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && u.handle && link(u.handle)} autoFocus placeholder="email@client.com"
-                        style={{ flex: 1, padding: "6px 9px", border: "1px solid var(--border-color)", borderRadius: 7, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                      <button onClick={() => u.handle && link(u.handle)} disabled={saving}
-                        style={{ padding: "6px 12px", background: "var(--text-primary)", color: "#FFF", border: "none", borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
-                        {saving ? "…" : "OK"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
 // Panneau : rattacher un call "origine inconnue" à une vidéo
 function AttributeVideoPanel({ items, knownVideos, searchableJourneys, onAttributed }: { items: ToAttribute[]; knownVideos: KnownVideo[]; searchableJourneys: SearchableJourney[]; onAttributed: () => void }) {
   const [active, setActive] = useState<string | null>(null);
 
   return (
-    <Panel title="Calls à rattacher" padding="20px" style={{ marginBottom: 18 }}>
+    <Panel title="Calls à rattacher" padding="20px">
       <div style={{ padding: "12px 20px 4px" }}>
+        {items.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#2E5E28" }}>
+            <Check size={14} /> Tous les calls sont rattachés — rien à faire.
+          </div>
+        ) : (
+        <>
         <p style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10, lineHeight: 1.5 }}>
           Ces calls sont arrivés sans parcours ManyChat. Relie-les au bon parcours (recherche par @handle) pour reconstruire leur historique complet. Si tu ne trouves pas la personne, attribue-lui simplement une vidéo source.
         </p>
@@ -614,6 +554,8 @@ function AttributeVideoPanel({ items, knownVideos, searchableJourneys, onAttribu
               isActive={active === it.email} onOpen={() => setActive(it.email)} onClose={() => setActive(null)} onDone={() => { setActive(null); onAttributed(); }} />
           ))}
         </div>
+        </>
+        )}
       </div>
     </Panel>
   );
