@@ -53,10 +53,12 @@ export async function getAuthenticatedClient() {
   return client;
 }
 
+// Vrai statut de connexion : vérifie que le token existe ET qu'il est encore
+// utilisable (refresh réussi si expiré), pas juste qu'une ligne existe en base.
 export async function isGoogleConnected(): Promise<boolean> {
   try {
-    const stored = await getPrisma().googleToken.findUnique({ where: { id: 1 } });
-    return !!stored;
+    await getAuthenticatedClient();
+    return true;
   } catch {
     return false;
   }
