@@ -34,10 +34,10 @@ function formatBooking(b: Record<string, unknown>, calStatus: string) {
       ? { name: attendees[0].name, email: attendees[0].email }
       : null,
     dateLabel: start.toLocaleDateString("fr-FR", {
-      weekday: "long", day: "numeric", month: "long",
+      weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Paris",
     }),
-    timeLabel: `${start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })} — ${end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`,
-    isToday: start.toDateString() === new Date().toDateString(),
+    timeLabel: `${start.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })} — ${end.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}`,
+    isToday: start.toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) === new Date().toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }),
   };
 }
 
