@@ -22,7 +22,7 @@ async function scrapeAndBuild() {
 
   const p = profileData.items[0] as Record<string, unknown>;
 
-  const posts = (postsData.items as Record<string, unknown>[]).map((post) => ({
+  const freshPosts = (postsData.items as Record<string, unknown>[]).map((post) => ({
     id: post.id as string,
     type: post.type as string,
     shortCode: post.shortCode as string,
@@ -32,7 +32,22 @@ async function scrapeAndBuild() {
     likes: (post.likesCount as number) ?? 0,
     comments: (post.commentsCount as number) ?? 0,
     timestamp: post.timestamp as string,
-  })).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }));
+
+  // Fusionne avec le cache existant au lieu d'écraser : le scraper Apify est
+  // instable (pagination Instagram non déterministe) et peut sauter des posts
+  // d'un scrape à l'autre. Une fois vu une fois, un post reste dans l'historique.
+  const existingCache = await getPrisma().instagramCache.findUnique({ where: { id: 1 } });
+  const previousPosts = existingCache
+    ? ((JSON.parse(existingCache.data).recentPosts ?? []) as typeof freshPosts)
+    : [];
+
+  const postsByShortCode = new Map<string, typeof freshPosts[number]>();
+  for (const post of previousPosts) postsByShortCode.set(post.shortCode, post);
+  for (const post of freshPosts) postsByShortCode.set(post.shortCode, post); // le plus récent (likes/comments à jour) gagne
+
+  const posts = [...postsByShortCode.values()]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
   // Snapshot quotidien
   const today = new Date(); today.setHours(0, 0, 0, 0);
