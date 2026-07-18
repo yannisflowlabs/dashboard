@@ -35,6 +35,7 @@ interface TunnelData {
   callSources: { source: string; calls: number; clients: number }[];
   followersHistory: { date: string; followers: number }[];
   noShows: number;
+  showRate: number | null;
   totalCallsDone: number;
   hasPlausible: boolean;
   updatedAt: string;
@@ -126,7 +127,9 @@ export default function TunnelPage() {
 
   const globalConv = reelsViews > 0 ? ((clients / reelsViews) * 100).toFixed(3) : "—";
   const callConv = callsBooked > 0 ? Math.round((clients / callsBooked) * 100) : 0;
-  const showRate = callsBooked > 0 ? Math.round((callsDone / callsBooked) * 100) : 0;
+  // Même formule que l'onglet Calendrier : showed / (showed + noshow), calls passés
+  // uniquement (exclut les calls à venir et annulés) — évite d'afficher 2 taux différents.
+  const showRate = data?.showRate ?? 0;
   const viewsToDm = reelsViews > 0 && dmSent > 0 ? ((dmSent / reelsViews) * 100).toFixed(1) : null;
 
   // Deltas vs période précédente

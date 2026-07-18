@@ -120,6 +120,16 @@ async function computeFunnel(
   const callsDone = pastR.filter((b) => showedIds.has(b.id as number)).length;
   const noShows = cancelledR.length + rejectedR.length;
 
+  // Taux de présence RÉEL : showed / (showed + noshow) parmi les calls passés
+  // de la période, en excluant les calls à venir et les annulés — même formule
+  // que l'onglet Calendrier, pour éviter d'afficher deux chiffres différents.
+  const pastIdsInRange = new Set(pastR.map((b) => b.id as number));
+  const reviewsInRange = data.reviews.filter((r) => pastIdsInRange.has(r.bookingId));
+  const showedInRange = reviewsInRange.filter((r) => r.status === "showed").length;
+  const noshowInRange = reviewsInRange.filter((r) => r.status === "noshow").length;
+  const showRateRelevant = showedInRange + noshowInRange;
+  const showRate = showRateRelevant > 0 ? Math.round((showedInRange / showRateRelevant) * 100) : null;
+
   const clientsInRange = data.clients.filter((c) => inRange(c.clientSince ?? c.createdAt));
   const reelsViews = reelsRecords.reduce((sum, r) => sum + r.views, 0);
 
@@ -130,6 +140,7 @@ async function computeFunnel(
     callsBooked,
     callsDone,
     noShows,
+    showRate,
     clients: clientsInRange.length,
     clientsInRange,
     pastR,
@@ -285,6 +296,7 @@ export async function GET(req: Request) {
       callSources: callSourcesWithClients,
       followersHistory,
       noShows: cur.noShows,
+      showRate: cur.showRate,
       totalCallsDone: cur.callsDone,
       reelsMonthsWithData,
       reelsMissingMonths,
